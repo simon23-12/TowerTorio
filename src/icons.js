@@ -59,3 +59,10 @@ export function towerUpIcon(id, level = 0) {
   }
   return `<svg viewBox="0 0 100 100"><rect x="2" y="2" width="96" height="96" rx="6" fill="#141820"/>${tower}${fx}</svg>`;
 }
+
+const GLYPHS = { ember: '✶', stone: '◆', swift: '»', hawk: '◎', rime: '❄', greed: '◈', storm: 'ϟ', twinfang: '‖', aegis: '⛨', titan: '▲', inferno: '✹', chronos: '⧗' };
+export function runeIcon(id, color, edge = '#9aa4b8') {
+  return `<svg viewBox="0 0 100 100"><polygon points="50,4 90,27 90,73 50,96 10,73 10,27" fill="#141820" stroke="${edge}" stroke-width="4"/>
+    <polygon points="50,16 79,33 79,67 50,84 21,67 21,33" fill="${color}" opacity="0.22"/>
+    <text x="50" y="64" font-size="42" text-anchor="middle" fill="${color}" font-family="sans-serif" font-weight="bold">${GLYPHS[id] || '?'}</text></svg>`;
+}

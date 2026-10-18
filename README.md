@@ -10,6 +10,9 @@ A browser game crossover of **tower defense** and **Factorio-style automation**,
 - Each resource powers one stat: Alcamanium → Attack, Vitrium → HP, Quicksilite → Dexterity, Voltarite → Energy (fire rate, extra weapons, special attacks).
 - Stat tiers depend on the **steady delivery rate** (crystals/min), so the factory has to keep running.
 - **Tower upgrades** (Upgrades → Tower tab, or the button in the corridor): Rapid Fire, Twin Laser, Chain Laser, Precision Optics, Nanite Repair (regen + block chance), Cryo Rounds (slow) and Bounty Protocol (double credits) — mostly chances that grow per level.
+- **Stages:** the 8 sectors are Stage 1. Clearing it unlocks special attacks (Time Warp, Energy Hail, Overdrive — hidden until then, kept for future runs), a third rune slot and epic runes; Stage 2 starts harder and keeps everything. More stages are planned.
+- **Runes:** choose Ember or Stone at the start (one slot). Runes drop after Sectors 2, 4 and 6; a second slot opens after Sector 4. Manage them with `E`.
+- The tower visibly bulks up with its upgrades (buttresses, crown, plinth, and a part per upgrade) and shows its runes as gems.
 - Lose the core and you can **start over from Sector 1 with your factory intact**.
 - Credits buy machines, **Upgrades** (Mk2/Mk3 for every building of a type at once, shown as visual cards) and **Research** (unlocks new elements to quarry).
 
@@ -20,7 +23,7 @@ A browser game crossover of **tower defense** and **Factorio-style automation**,
 | `V` | split view – both maps side by side |
 | Corridor | click inside the lit front sector = build tower, drag / `WASD` pan, `T` rotate view 90°, wheel zoom, `1` `2` `3` specials, `N` call wave early |
 | Factory | `1` belt, `2` drill, `3` refinery, `4` teleporter, `R` rotate building, `T` rotate view 90°, right-click remove, `Q` deselect, `WASD` pan, `U` upgrades, `Y` research |
-| Global | `P` pause, `F` speed, `M` mute, `K` codex |
+| Global | `E` runes, `P` pause, `F` speed, `M` mute, `K` codex |
 
 Hover any building or tower for its stats. The game autosaves; **Continue** on the main menu resumes.
 

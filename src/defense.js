@@ -1,10 +1,11 @@
 // The tower-defense map: a long dark corridor split into sectors, covered by fog of war.
 import * as THREE from 'three';
 import {
-  game, emit, toast, spend, earn, towerStats, RESOURCES, RES_KEYS,
+  game, emit, toast, spend, earn, towerStats, RESOURCES, RES_KEYS, RUNES, meta,
   SECTORS, SECTOR_LEN, CORRIDOR_W, CORRIDOR_LEN,
 } from './state.js';
 import { stoneTexture, textTexture } from './textures.js';
+import { rollRunes, setRuneSlots } from './state.js';
 
 const SL = SECTOR_LEN, L = CORRIDOR_LEN, HW = CORRIDOR_W / 2;
 const NV = 20;          // max vision sources in the fog shader
@@ -153,31 +154,125 @@ function buildEnemyMesh(type) {
   return { root, body, legs, bar };
 }
 
+const TM = {
+  gold: basic(0xffc040), cyan: basic(0x40e0ff), purple: basic(0xb070ff), green: basic(0x46ff88),
+  ice: basic(0xbfeaff), yellow: basic(0xffff70), orange: basic(0xffa040),
+  torus: new THREE.TorusGeometry(1, 0.08, 6, 28),
+};
+
+// The tower grows with its upgrades: buttresses, a bigger crown, a heavy plinth,
+// and a visible part for every tower upgrade that has at least one level.
 function buildTowerMesh() {
   const g = new THREE.Group();
-  g.add(mesh(G.cyl, M.stoneDark, 1.25, 0.6, 1.25, 0, 0.3, 0));
-  g.add(mesh(G.cyl, M.stone, 0.62, 3.0, 0.62, 0, 2.0, 0));
-  g.add(mesh(G.cyl, M.stone, 1.0, 0.35, 1.0, 0, 3.6, 0));
+  const body = new THREE.Group();
+  g.add(body);
+  body.add(mesh(G.cyl, M.stoneDark, 1.25, 0.6, 1.25, 0, 0.3, 0));
+  body.add(mesh(G.cyl, M.stone, 0.62, 3.0, 0.62, 0, 2.0, 0));
+  body.add(mesh(G.cyl, M.stone, 1.0, 0.35, 1.0, 0, 3.6, 0));
   for (let i = 0; i < 6; i++) {
     const a = i / 6 * Math.PI * 2;
-    g.add(mesh(G.box, M.stone, 0.32, 0.4, 0.32, Math.cos(a) * 0.82, 3.95, Math.sin(a) * 0.82));
+    body.add(mesh(G.box, M.stone, 0.32, 0.4, 0.32, Math.cos(a) * 0.82, 3.95, Math.sin(a) * 0.82));
   }
   const crystalMat = basic(0xffd090);
   const crystal = mesh(G.oct, crystalMat, 0.38, 0.55, 0.38, 0, 4.6, 0);
-  g.add(crystal);
-  // one ring per stat, shown once that stat has a tier
+  body.add(crystal);
   const rings = RES_KEYS.map((k, i) => {
     const r = new THREE.Mesh(new THREE.TorusGeometry(0.75, 0.06, 6, 24), basic(RESOURCES[k].color));
     r.rotation.x = Math.PI / 2;
     r.position.y = 1.2 + i * 0.55;
     r.visible = false;
-    g.add(r);
+    body.add(r);
     return r;
   });
+
+  const part = () => { const p = new THREE.Group(); p.visible = false; body.add(p); return p; };
+  const up = {};
+  up.buttress = part();
+  for (let i = 0; i < 4; i++) {
+    const a = i * Math.PI / 2 + Math.PI / 4;
+    const bt = mesh(G.box, M.stone, 0.38, 2.4, 0.55, Math.cos(a) * 0.95, 1.2, Math.sin(a) * 0.95);
+    bt.rotation.y = -a;
+    bt.rotation.z = 0.28;
+    const piv = new THREE.Group();
+    piv.add(bt);
+    up.buttress.add(piv);
+  }
+  up.crown = part();
+  up.crown.add(mesh(G.cyl, M.stone, 1.35, 0.3, 1.35, 0, 3.75, 0));
+  for (let i = 0; i < 8; i++) {
+    const a = i / 8 * Math.PI * 2;
+    up.crown.add(mesh(G.box, M.stone, 0.4, 0.55, 0.4, Math.cos(a) * 1.15, 4.15, Math.sin(a) * 1.15));
+  }
+  up.plinth = part();
+  up.plinth.add(mesh(new THREE.CylinderGeometry(1.75, 1.95, 0.45, 8), M.stoneDark, 1, 1, 1, 0, 0.22, 0));
+  up.plinth.add(mesh(new THREE.CylinderGeometry(1.8, 1.8, 0.06, 8), TM.gold, 1, 1, 1, 0, 0.46, 0));
+  up.rapid = part();
+  const rr = new THREE.Mesh(TM.torus, TM.orange); rr.scale.setScalar(0.95); rr.rotation.x = Math.PI / 2; rr.position.y = 3.15;
+  up.rapid.add(rr); up.rapidRing = rr;
+  up.twin = part();
+  for (const z of [-0.6, 0.6]) {
+    up.twin.add(mesh(G.cyl, M.stoneDark, 0.12, 0.8, 0.12, 0, 4.35, z), mesh(G.sphere, TM.cyan, 0.12, 0.12, 0.12, 0, 4.8, z));
+  }
+  up.chain = part();
+  for (let i = 0; i < 3; i++) {
+    const t = new THREE.Mesh(TM.torus, TM.purple);
+    t.scale.setScalar(0.32 - i * 0.07); t.rotation.x = Math.PI / 2; t.position.y = 5.15 + i * 0.22;
+    up.chain.add(t);
+  }
+  up.chain.add(mesh(G.sphere, TM.purple, 0.13, 0.13, 0.13, 0, 5.85, 0));
+  up.crit = part();
+  up.crit.add(mesh(G.box, M.stoneDark, 0.5, 0.18, 0.18, 0.75, 4.0, 0), mesh(G.sphere, TM.yellow, 0.1, 0.1, 0.1, 1.02, 4.0, 0));
+  up.regen = part();
+  const nr = new THREE.Mesh(TM.torus, TM.green); nr.scale.setScalar(1.45); nr.rotation.x = Math.PI / 2; nr.position.y = 0.7;
+  up.regen.add(nr);
+  for (let i = 0; i < 3; i++) up.regen.add(mesh(G.sphere, TM.green, 0.09, 0.09, 0.09, 0, 0, 0));
+  up.regenOrbs = up.regen.children.slice(1);
+  up.frost = part();
+  for (let i = 0; i < 5; i++) {
+    const a = i / 5 * Math.PI * 2 + 0.3;
+    const c = mesh(G.cone, TM.ice, 0.14, 0.9, 0.14, Math.cos(a) * 1.3, 0.55, Math.sin(a) * 1.3);
+    c.rotation.z = Math.cos(a) * -0.4; c.rotation.x = Math.sin(a) * 0.4;
+    up.frost.add(c);
+  }
+  up.bounty = part();
+  up.bounty.add(mesh(G.cyl, TM.gold, 0.68, 0.14, 0.68, 0, 2.75, 0), mesh(G.cyl, TM.gold, 0.68, 0.08, 0.68, 0, 1.25, 0));
+  // rune gems set into the shaft
+  const gems = [0, 1, 2].map(i => {
+    const gm = mesh(G.oct, basic(0xffffff), 0.16, 0.22, 0.16, 0, 1.7 + i * 0.6, 0);
+    const a = -Math.PI / 2 + (i - 1) * 0.6;
+    gm.position.x = Math.cos(a) * -0.66; gm.position.z = Math.sin(a) * -0.66;
+    gm.visible = false;
+    body.add(gm);
+    return gm;
+  });
+
   const bar = makeBar(2.2, M.barTower, 5.6);
   bar.visible = true;
   g.add(bar);
-  return { group: g, crystal, crystalMat, rings, bar };
+  return { group: g, body, crystal, crystalMat, rings, bar, up, gems };
+}
+
+// show/hide the upgrade parts and grow the tower with its total upgrade level
+function updateTowerLook(m, u, runes, dt, time) {
+  const total = Object.values(u).reduce((a, b) => a + b, 0);
+  m.up.buttress.visible = total >= 2;
+  m.up.crown.visible = total >= 6;
+  m.up.plinth.visible = total >= 12;
+  for (const k of ['rapid', 'twin', 'chain', 'crit', 'regen', 'frost', 'bounty']) m.up[k].visible = u[k] > 0;
+  const sx = 1 + Math.min(0.45, total * 0.016), sy = 1 + Math.min(0.55, total * 0.02);
+  m.body.scale.set(sx, sy, sx);
+  m.bar.position.y = 5.6 * sy + (u.chain > 0 ? 0.6 : 0);
+  m.up.rapidRing.rotation.z += dt * (2 + u.rapid);
+  m.up.chain.rotation.y += dt * 3;
+  m.up.regenOrbs.forEach((o, i) => {
+    const a = time * 1.5 + i * Math.PI * 2 / 3;
+    o.position.set(Math.cos(a) * 1.45, 0.7 + Math.sin(time * 2 + i) * 0.25, Math.sin(a) * 1.45);
+  });
+  m.gems.forEach((gm, i) => {
+    const id = runes[i];
+    gm.visible = !!id;
+    if (id) { gm.material.color.set(RUNES[id].color); gm.rotation.y += dt * 2; }
+  });
 }
 
 function buildRubble() {
@@ -250,8 +345,9 @@ void main() {
 // The corridor runs along +x in world space; the camera looks "up" it, so on screen
 // enemies come from the top and the core sits at the bottom.
 export class Defense {
-  constructor(attract = false) {
+  constructor(attract = false, stage = 1) {
     this.attract = attract;
+    this.stage = stage;
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x020308);
     this.camera = new THREE.PerspectiveCamera(48, innerWidth / innerHeight, 0.5, 400);
@@ -362,7 +458,7 @@ export class Defense {
     // enemy portal at the far, dark end
     this.portal = new THREE.Group();
     this.portal.position.set(L + 3, 0, 0);
-    const pr = new THREE.Mesh(new THREE.TorusGeometry(1.8, 0.15, 8, 40), basic(0xa030ff));
+    const pr = new THREE.Mesh(new THREE.TorusGeometry(1.8, 0.15, 8, 40), basic([0xa030ff, 0xff3040, 0x30ff90][(this.stage - 1) % 3]));
     pr.rotation.y = Math.PI / 2;
     pr.position.y = 2.05;
     const pd = new THREE.Mesh(new THREE.CircleGeometry(1.7, 32), basic(0x300050, { transparent: true, opacity: 0.85, side: THREE.DoubleSide }));
@@ -517,13 +613,17 @@ export class Defense {
     this.cleared++;
     this.refreshSectors();
     this._clearFx(s);
-    if (this.cleared >= SECTORS) { toast('The corridor is secured!', 'good'); emit('victory'); return; }
+    if (this.cleared >= SECTORS) { emit('stageCleared', this.stage); return; }
     // bounty, topped up so the next tower is always affordable (no income while waves are halted)
     let bounty = 25 + 10 * s;
     const short = this.towerCost(this.cleared) - (game.credits + bounty);
     if (short > 0) bounty += short;
     earn(bounty);
-    emit('sectorCleared', { sector: s, bounty, nextCost: this.towerCost(this.cleared), last: false });
+    // runes drop after sectors 2, 4 and 6; the rarity improves as you go
+    const runeTiers = { 1: ['common'], 3: ['common', 'rare'], 5: ['rare'] }[s];
+    const runes = runeTiers ? rollRunes(this.stage > 1 ? [...runeTiers, 'epic'] : runeTiers) : [];
+    if (s === 3 && game.runes.slots.length < 2) { setRuneSlots(2); toast('Second rune slot unlocked!', 'good'); }
+    emit('sectorCleared', { sector: s, bounty, nextCost: this.towerCost(this.cleared), last: false, runes });
     this._sfx('fanfare');
   }
 
@@ -577,7 +677,8 @@ export class Defense {
   }
 
   // ----- waves -----
-  diff(w = this.wave) { return 1 + (w - 1) * DIFF_STEP; }
+  // each stage starts where the previous one's difficulty ended
+  diff(w = this.wave) { return 1 + (w - 1 + (this.stage - 1) * SECTORS * WAVES_PER_SECTOR * 0.8) * DIFF_STEP; }
   hpMul(w = this.wave) { const d = this.diff(w) - 1; return 1 + 0.15 * d + HP_QUAD * d * d; }
   dmgMul(w = this.wave) { return 1 + 0.06 * (this.diff(w) - 1); }
 
@@ -666,7 +767,7 @@ export class Defense {
     const c = new THREE.Color(e.T.color).getHex();
     this._burst(e.x, 0.8, e.z, c, e.T.boss ? 60 : 14, e.T.boss ? 9 : 5);
     if (!this.attract) {
-      let reward = Math.round(e.T.reward * (1 + 0.02 * (this.diff() - 1)));
+      let reward = Math.round(e.T.reward * (1 + 0.02 * (this.diff() - 1)) * this.stats().creditMul);
       if (Math.random() < this.stats().bounty) {
         reward *= 2;
         this._burst(e.x, 1.4, e.z, 0xffd046, 10, 4);
@@ -760,9 +861,12 @@ export class Defense {
   }
 
   // ----- specials -----
+  specialsUnlocked() { return this.attract || meta.stagesCleared >= 1; }
   useSpecial(id) {
+    if (!this.specialsUnlocked()) return;
     const sp = SPECIALS.find(s => s.id === id);
     const S = this.stats();
+    const lv = game.specialUp?.[id] || 0;
     if (S.energyTier < sp.req) { toast(`${sp.name} needs Energy Tier ${sp.req} (Voltarite)`, 'bad'); this._sfx('error'); return; }
     if (this.energy < sp.cost) { toast(`Not enough energy for ${sp.name}`, 'bad'); this._sfx('error'); return; }
     if (id === 'hail') {
@@ -773,10 +877,10 @@ export class Defense {
         const n = vis.filter(o => Math.hypot(o.x - e.x, o.z - e.z) < 4).length;
         if (n > bestN) { bestN = n; best = e; }
       }
-      this.hail = { x: best.x, z: best.z, left: 20, timer: 0, dmg: Math.max(15, S.damage * 3) };
+      this.hail = { x: best.x, z: best.z, left: 20 + 5 * lv, timer: 0, dmg: Math.max(15, S.damage * (3 + 0.5 * lv)) };
     }
-    if (id === 'slow') this.slowT = 6;
-    if (id === 'over') this.overT = 6;
+    if (id === 'slow') { this.slowT = 6 + 1.5 * lv; this.slowMul = 1 - (0.6 + 0.05 * lv); }
+    if (id === 'over') { this.overT = 6 + 1.5 * lv; this.overMul = 2.5 + 0.25 * lv; }
     this.energy -= sp.cost;
     this._sfx('special');
   }
@@ -849,7 +953,7 @@ export class Defense {
   }
 
   _updateEnemies(dt) {
-    const slow = this.slowT > 0 ? 0.4 : 1;
+    const slow = this.slowT > 0 ? (this.slowMul ?? 0.4) : 1;
     // only so many melee attackers fit around a tower; the rest queue up
     for (const t of this.towers) if (t) t.slots = 5;
     for (const e of this.enemies) if (e.engaged) e.engaged.slots--;
@@ -924,7 +1028,7 @@ export class Defense {
   }
 
   _updateTowers(dt, S) {
-    const rate = this.overT > 0 ? 2.5 : 1;
+    const rate = this.overT > 0 ? (this.overMul ?? 2.5) : 1;
     const crystalCol = ARROW_COLORS[Math.min(ARROW_COLORS.length - 1, S.attackTier)];
     for (const t of this.towers) {
       if (!t?.alive || !t.active) continue;
@@ -951,6 +1055,7 @@ export class Defense {
         }
       }
       const m = t.mesh;
+      updateTowerLook(m, this.attract ? ATTRACT_UP : game.towerUp, this.attract ? [] : game.runes.slots, dt, this.time);
       m.crystal.rotation.y += dt * (1 + S.fireRate);
       m.crystalMat.color.setHex(crystalCol);
       RES_KEYS.forEach((k, i) => {

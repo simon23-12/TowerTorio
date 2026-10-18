@@ -185,6 +185,32 @@ body.split::after { content: ''; position: fixed; top: 0; bottom: 0; left: var(-
 .upg-tabs .tab { flex: 0 0 auto; }
 .tc-row { display: flex; gap: 8px; align-items: center; }
 
+/* runes */
+.rune-row { display: flex; flex-wrap: wrap; gap: 12px; margin: 4px 0 10px; }
+.rune-card { width: 170px; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 10px; background: rgba(255,255,255,0.03); border: 2px solid; border-radius: 10px; color: var(--text); font-family: 'Rajdhani', sans-serif; cursor: pointer; transition: transform .12s, box-shadow .12s; }
+.rune-card:hover { transform: translateY(-3px); box-shadow: 0 0 18px rgba(255,255,255,0.15); }
+.rune-card svg, .rune-slot svg { width: 64px; height: 64px; }
+.rune-row.big .rune-card { width: 220px; } .rune-row.big .rune-card svg { width: 96px; height: 96px; }
+.rune-card .rn { font-family: 'Orbitron', sans-serif; font-size: 13px; }
+.rune-card .rt { font-size: 11px; text-transform: uppercase; letter-spacing: 0.15em; }
+.rune-card .rd { font-size: 14px; text-align: center; }
+.rune-slot { width: 170px; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 10px; border: 1px dashed var(--line); border-radius: 10px; color: var(--dim); background: none; font-family: 'Rajdhani', sans-serif; font-size: 14px; }
+.rune-slot.filled { border-style: solid; color: var(--text); cursor: pointer; }
+.rune-slot.filled:hover { border-color: var(--bad); }
+.rune-slot small { color: var(--dim); text-align: center; }
+.modal-box h4 { margin: 4px 0; }
+#runebar { display: flex; gap: 3px; cursor: pointer; }
+.rb-slot svg { width: 28px; height: 28px; display: block; }
+.upg-section { grid-column: 1 / -1; margin: 6px 0 0; font-family: 'Orbitron', sans-serif; color: #c890ff; }
+.upg-section small { color: var(--dim); font-family: 'Rajdhani', sans-serif; font-size: 13px; margin-left: 8px; }
+.locked-card { grid-column: 1 / -1; opacity: 0.6; }
+.sc-runes-wrap { text-align: left; border-top: 1px solid var(--line); padding-top: 10px; margin-bottom: 8px; }
+.sc-runes-wrap h4 { margin: 0 0 6px; font-family: 'Orbitron', sans-serif; font-size: 11px; letter-spacing: 0.15em; color: var(--warn); text-transform: uppercase; }
+.sc-runes-wrap .rune-row { justify-content: center; }
+.stage-title { font-family: 'Orbitron', sans-serif; font-size: 40px !important; color: #ffd046 !important; text-shadow: 0 0 24px rgba(255,208,70,0.6); }
+#stc-body { color: var(--text); line-height: 1.6; text-align: left; margin-bottom: 8px; }
+#stc-body li { margin: 2px 0; }
+
 /* sector cleared */
 #sector-clear { position: fixed; inset: 0; z-index: 18; display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse at center, rgba(40,120,200,0.25), rgba(2,4,8,0.7)); animation: scfade .4s ease-out; }
 .sc-box { position: relative; overflow: hidden; width: min(560px, calc(100vw - 32px)); background: var(--panel); border: 1px solid rgba(96,224,255,0.6); border-radius: 14px; padding: 26px 28px 20px; text-align: center; box-shadow: 0 0 60px rgba(70,200,255,0.35); animation: scpop .55s cubic-bezier(.2,1.4,.4,1); }

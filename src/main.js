@@ -3,7 +3,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { game, on, resetGame, updateEconomy, TOWER_UPGRADES } from './state.js';
+import { game, on, resetGame, updateEconomy, TOWER_UPGRADES, meta, saveMeta, setRuneSlots, toast } from './state.js';
 import { Defense } from './defense.js';
 import { Factory } from './factory.js';
 import { UI } from './ui.js';
@@ -116,12 +116,18 @@ function refreshContinue() { $('btn-continue').classList.toggle('hidden', !readS
 
 function startGame(save) {
   resetGame();
-  defense = new Defense(false);
   factory = new Factory();
   if (save) {
+    const fresh = { runes: game.runes, specialUp: game.specialUp };
     Object.assign(game, save.game, { research: new Set(save.game.research), discovered: new Set(save.game.discovered), view: 'defense' });
     game.upgrades = { miner: 0, refinery: 0, belt: game.beltTier || 0, teleporter: 0, ...save.game.upgrades };
     game.towerUp = { ...Object.fromEntries(Object.keys(TOWER_UPGRADES).map(k => [k, 0])), ...(save.game.towerUp || {}) };
+    game.runes = save.game.runes || fresh.runes;
+    game.specialUp = { ...fresh.specialUp, ...(save.game.specialUp || {}) };
+    game.stage = save.game.stage || 1;
+  }
+  defense = new Defense(false, game.stage);
+  if (save) {
     defense.load(save.defense);
     factory.load(save.factory);
     split = !!save.split;
@@ -140,7 +146,8 @@ function startGame(save) {
   $('btn-speed').textContent = '×' + game.speed;
   audio.playTrack('game', 0.45);
   if (!save) setTimeout(() => ui.toast('The corridor is dark. Click inside Sector 1 to build your first tower.', 'warn'), 600);
-  else ui.toast(`Welcome back — wave ${game.wave}`, 'good');
+  else ui.toast(`Welcome back — Stage ${game.stage}, wave ${game.wave}`, 'good');
+  if (!game.runes.owned.length) ui.showRuneStart();
 }
 
 function toMenu() {
@@ -160,6 +167,41 @@ function toMenu() {
 }
 
 on('openModal', id => ui.openModal(id));
+// all 8 sectors of a stage cleared: unlocks, then on to the next stage with everything kept
+on('stageCleared', stage => {
+  const first = meta.stagesCleared < stage;
+  meta.stagesCleared = Math.max(meta.stagesCleared, stage);
+  saveMeta();
+  setRuneSlots(3);
+  game.paused = true;
+  modal = true;
+  $('stc-n').textContent = stage;
+  $('btn-next-stage').textContent = `Continue to Stage ${stage + 1}`;
+  $('stc-body').innerHTML = `<ul>
+    ${stage === 1 ? `<li><b>Special attacks</b> unlocked${first ? ' — for this and every future run' : ''}: Time Warp, Energy Hail, Overdrive (keys 1–3), upgradeable in Upgrades → Tower.</li>` : ''}
+    <li><b>Third rune slot</b> unlocked.</li>
+    <li><b>Epic runes</b> can now drop.</li>
+    <li>Your factory, upgrades, research, tower upgrades and runes all carry over.</li>
+    <li>Stage ${stage + 1} is harder from the first wave. More stages are coming.</li></ul>
+    <p class="sub">${game.wave} waves · ${game.stats.kills} enemies slain · ${game.stats.delivered} crystals teleported</p>`;
+  $('stage-clear').classList.remove('hidden');
+  audio.sfx('fanfare');
+  saveGame();
+});
+$('btn-next-stage').onclick = () => {
+  $('stage-clear').classList.add('hidden');
+  game.stage++;
+  Object.assign(game, { wave: 0, coreHP: game.coreMax, paused: false });
+  defense = new Defense(false, game.stage);
+  modal = false;
+  layout();
+  ui.setView('defense', split);
+  ui.hideSectorCleared();
+  saveGame();
+  toast(`Stage ${game.stage} begins. The darkness is thicker here — build in Sector 1.`, 'warn');
+};
+$('btn-stage-menu').onclick = () => { $('stage-clear').classList.add('hidden'); game.paused = false; game.stage++; defense = new Defense(false, game.stage); game.wave = 0; game.coreHP = game.coreMax; toMenu(); };
+
 on('victory', () => {
   game.over = true;
   clearSave();
@@ -220,7 +262,7 @@ $('btn-retry').onclick = () => startGame(null);
 $('btn-keep').onclick = () => {
   audio.sfx('build');
   Object.assign(game, { over: false, paused: false, wave: 0, coreHP: game.coreMax, credits: Math.max(game.credits, 100) });
-  defense = new Defense(false);
+  defense = new Defense(false, game.stage);
   modal = false;
   layout();
   ui.setView(game.view, split);
@@ -267,9 +309,10 @@ canvas.addEventListener('wheel', e => { e.preventDefault(); viewAt(e.clientX)?.o
 
 addEventListener('keydown', e => {
   if (mode !== 'playing') return;
+  if (!$('rune-start').classList.contains('hidden') || !$('stage-clear').classList.contains('hidden')) { if (e.code === 'Tab') e.preventDefault(); return; }
   if (e.code === 'Tab') { e.preventDefault(); if (!game.paused) setView(game.view === 'defense' ? 'factory' : 'defense'); return; }
   if (e.code === 'Escape' || e.code === 'KeyP') {
-    const anyModal = ['howto', 'codex', 'research', 'upgrades', 'credits-modal'].some(id => !$(id).classList.contains('hidden'));
+    const anyModal = ['howto', 'codex', 'research', 'upgrades', 'credits-modal', 'runes'].some(id => !$(id).classList.contains('hidden'));
     if (anyModal) { ui.closeModals(); return; }
     if (!$('sector-clear').classList.contains('hidden')) { ui.hideSectorCleared(); return; }
     if (e.code === 'Escape' && game.view === 'factory' && (factory.tool || factory.selected)) { factory.onKey('Escape'); return; }
@@ -282,6 +325,7 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyF') { toggleSpeed(); return; }
   if (e.code === 'KeyV') { toggleSplit(); return; }
   if (e.code === 'KeyK') { ui.openModal('codex'); return; }
+  if (e.code === 'KeyE') { ui.openModal('runes'); return; }
   if (e.code === 'KeyU') { ui.upgTab = game.view === 'defense' ? 'tower' : 'factory'; ui.openModal('upgrades'); return; }
   if (e.code === 'KeyY') { ui.openModal('research'); return; }
   const v = focused();

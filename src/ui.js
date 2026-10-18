@@ -1,6 +1,7 @@
 // DOM HUD: stats, objectives, panels, toasts, codex, research.
-import { game, on, rate, buyResearch, buyUpgrade, buyTowerUpgrade, towerUpCost, RESOURCES, RES_KEYS, STAT_INFO, TIERS, RESEARCH, UPGRADES, TOWER_UPGRADES, TOWER_UP_MAX } from './state.js';
-import { buildingIcon, oreIcon, towerUpIcon } from './icons.js';
+import { game, on, rate, buyResearch, buyUpgrade, buyTowerUpgrade, towerUpCost, RESOURCES, RES_KEYS, STAT_INFO, TIERS, RESEARCH, UPGRADES, TOWER_UPGRADES, TOWER_UP_MAX,
+  RUNES, RUNE_TIER_COLORS, grantRune, equipRune, unequipRune, SPECIAL_UPGRADES, specialUpCost, buySpecialUpgrade, meta } from './state.js';
+import { buildingIcon, oreIcon, towerUpIcon, runeIcon } from './icons.js';
 import { ENEMY_TYPES, SPECIALS } from './defense.js';
 import { BUILD } from './factory.js';
 
@@ -40,6 +41,13 @@ export class UI {
       if (t) { buyTowerUpgrade(t.dataset.tup); this.renderUpgrades(); }
     });
     $('sector-clear').addEventListener('click', ev => {
+      const rp = ev.target.closest('[data-runepick]');
+      if (rp) {
+        grantRune(rp.dataset.runepick);
+        $('sc-runes').innerHTML = `<div class="upg-done">✓ ${RUNES[rp.dataset.runepick].name} taken</div>`;
+        $('sector-clear').querySelector('.sc-buttons').classList.remove('hidden');
+        return;
+      }
       const a = ev.target.closest('[data-sc]');
       if (!a) return;
       const act = a.dataset.sc;
@@ -49,6 +57,27 @@ export class UI {
       if (act === 'tower') { this.upgTab = 'tower'; this.openModal('upgrades'); }
       if (act === 'upgrades' || act === 'research') this.openModal(act);
       if (act === 'factory') handlers.setView('factory');
+    });
+    // rune screen + first-rune choice
+    $('runes').addEventListener('click', ev => {
+      const sl = ev.target.closest('[data-slot]');
+      if (sl && game.runes.slots[+sl.dataset.slot]) { unequipRune(+sl.dataset.slot); this.renderRunes(); return; }
+      const r = ev.target.closest('[data-rune]');
+      if (r) { equipRune(r.dataset.rune); this.renderRunes(); }
+    });
+    $('rune-start').addEventListener('click', ev => {
+      const r = ev.target.closest('[data-runepick]');
+      if (!r) return;
+      grantRune(r.dataset.runepick);
+      $('rune-start').classList.add('hidden');
+      this.h.modalOpen(false);
+      game.paused = false;
+    });
+    $('btn-runes').onclick = () => this.openModal('runes');
+    $('runebar').onclick = () => this.openModal('runes');
+    $('upgrades-list').addEventListener('click', ev => {
+      const sp = ev.target.closest('[data-spup]');
+      if (sp) { buySpecialUpgrade(sp.dataset.spup); this.renderUpgrades(); }
     });
 
     $('tab-defense').onclick = () => handlers.setView('defense');
@@ -121,12 +150,13 @@ export class UI {
     this.closeModals(false);
     if (id === 'codex') this.renderCodex();
     if (id === 'research') this.renderResearch();
+    if (id === 'runes') this.renderRunes();
     if (id === 'upgrades') { this.upgTab ||= game.view === 'defense' ? 'tower' : 'factory'; this.renderUpgrades(); }
     $(id).classList.remove('hidden');
     this.h.modalOpen(true);
   }
   closeModals(notify = true) {
-    for (const id of ['howto', 'codex', 'research', 'upgrades', 'pausemenu', 'credits-modal']) $(id).classList.add('hidden');
+    for (const id of ['howto', 'codex', 'research', 'upgrades', 'pausemenu', 'credits-modal', 'runes']) $(id).classList.add('hidden');
     if (notify) this.h.modalOpen(false);
   }
 
@@ -183,20 +213,59 @@ export class UI {
           <div class="upg-stat">Now: <b>${l ? u.desc(l) : 'not installed'}</b></div>
           ${max ? '<div class="upg-done">✓ Maxed out</div>' : `<div class="upg-stat next">Lv ${l + 1}: <b>${u.desc(l + 1)}</b></div>`}
           ${max ? '' : `<button class="btn small" data-tup="${id}" ${game.credits < cost ? 'disabled' : ''}>Upgrade → Lv ${l + 1} · ${cost} ◈</button>`}</div></div>`;
-    }).join('');
+    }).join('') + this._specialCards();
+  }
+
+  _specialCards() {
+    if (!meta.stagesCleared) return `<div class="upg-card locked-card"><div class="upg-icon">${runeIcon('chronos', '#556', '#334')}</div>
+      <div class="upg-body"><h5>??? Special attacks</h5><div class="meta">Clear <b>Stage 1</b> to discover and upgrade special attacks.</div></div></div>`;
+    return `<h4 class="upg-section">Special attacks <small>use with 1 · 2 · 3 in the corridor (needs Energy)</small></h4>` +
+      Object.entries(SPECIAL_UPGRADES).map(([id, u]) => {
+        const l = game.specialUp[id], max = l >= TOWER_UP_MAX, cost = specialUpCost(id);
+        const pips = Array.from({ length: TOWER_UP_MAX }, (_, i) => `<i style="${i < l ? 'background:#b070ff' : ''}"></i>`).join('');
+        return `<div class="upg-card ${l ? 'mk1' : ''}"><div class="upg-icon">${runeIcon({ slow: 'chronos', hail: 'storm', over: 'inferno' }[id], '#c890ff', '#b070ff')}<span class="mk-badge">Lv ${l}</span></div>
+          <div class="upg-body"><h5>${u.name}</h5><div class="pips">${pips}</div>
+          <div class="upg-stat">Now: <b>${u.desc(l)}</b></div>
+          ${max ? '<div class="upg-done">✓ Maxed out</div>' : `<div class="upg-stat next">Lv ${l + 1}: <b>${u.desc(l + 1)}</b></div>
+          <button class="btn small" data-spup="${id}" ${game.credits < cost ? 'disabled' : ''}>Upgrade → Lv ${l + 1} · ${cost} ◈</button>`}</div></div>`;
+      }).join('');
+  }
+
+  // ----- runes -----
+  _runeCard(id, attr) {
+    const r = RUNES[id], edge = RUNE_TIER_COLORS[r.tier];
+    return `<button class="rune-card" ${attr} style="border-color:${edge}">${runeIcon(id, r.color, edge)}
+      <span class="rn" style="color:${r.color}">${r.name}</span><span class="rt" style="color:${edge}">${r.tier}</span><span class="rd">${r.desc}</span></button>`;
+  }
+  renderRunes() {
+    const r = game.runes;
+    $('rune-slots').innerHTML = r.slots.map((id, i) => id
+      ? `<button class="rune-slot filled" data-slot="${i}" title="Click to remove">${runeIcon(id, RUNES[id].color, RUNE_TIER_COLORS[RUNES[id].tier])}<span>${RUNES[id].name}</span><small>${RUNES[id].desc}</small></button>`
+      : `<div class="rune-slot"><svg viewBox="0 0 100 100"><polygon points="50,4 90,27 90,73 50,96 10,73 10,27" fill="none" stroke="#334" stroke-width="4" stroke-dasharray="8 6"/></svg><span>Empty slot</span></div>`).join('') +
+      (r.slots.length < 3 ? `<div class="rune-slot locked"><svg viewBox="0 0 100 100"><polygon points="50,4 90,27 90,73 50,96 10,73 10,27" fill="#0c0e13" stroke="#223" stroke-width="4"/><text x="50" y="62" font-size="34" text-anchor="middle" fill="#445">🔒</text></svg><span>${r.slots.length < 2 ? 'Unlocks after Sector 4' : 'Unlocks after Stage 1'}</span></div>` : '');
+    const inv = r.owned.filter(id => !r.slots.includes(id));
+    $('rune-inv').innerHTML = inv.length ? inv.map(id => this._runeCard(id, `data-rune="${id}"`)).join('') : '<div class="meta">No spare runes. New runes drop when you clear Sectors 2, 4 and 6.</div>';
+  }
+  showRuneStart() {
+    $('rune-start-list').innerHTML = ['ember', 'stone'].map(id => this._runeCard(id, `data-runepick="${id}"`)).join('');
+    $('rune-start').classList.remove('hidden');
+    this.h.modalOpen(true);
+    game.paused = true;
   }
 
   // ----- sector cleared popup -----
-  showSectorCleared({ sector, bounty, nextCost, last }) {
+  showSectorCleared({ sector, bounty, nextCost, last, runes = [] }) {
     const tips = this._suggestions(nextCost);
+    const runeHtml = runes.length ? `<div class="sc-runes-wrap"><h4>Rune found — choose one</h4><div id="sc-runes" class="rune-row">${runes.map(id => this._runeCard(id, `data-runepick="${id}"`)).join('')}</div></div>` : '';
     $('sector-clear').innerHTML = `<div class="sc-box">
       <div class="sc-rays"></div>
       <div class="sc-kicker">Sector ${sector + 1}</div>
       <div class="sc-title">CLEARED</div>
       <div class="sc-bounty">+${bounty} ◈ bounty</div>
       ${last ? '' : `<div class="sc-next">The corridor is quiet. <b>Build a tower in Sector ${sector + 2}</b> to bring the next wave — it costs <b>${nextCost} ◈</b>. Your current tower shuts down when you do.</div>`}
+      ${runeHtml}
       <div class="sc-tips"><h4>Before you advance</h4>${tips.map(t => `<div class="sc-tip"><span>${t.text}</span>${t.act ? `<button class="btn small" data-sc="${t.act}">${t.label}</button>` : ''}</div>`).join('')}</div>
-      <div class="sc-buttons">${last ? '' : `<button class="btn" data-sc="goto">Go to Sector ${sector + 2}</button>`}<button class="btn ghost" data-sc="close">Continue</button></div>
+      <div class="sc-buttons ${runes.length ? 'hidden' : ''}">${last ? '' : `<button class="btn" data-sc="goto">Go to Sector ${sector + 2}</button>`}<button class="btn ghost" data-sc="close">Continue</button></div>
     </div>`;
     $('sector-clear').classList.remove('hidden');
   }
@@ -243,6 +312,13 @@ export class UI {
     $('core-chip').classList.toggle('low', game.coreHP <= 6);
     const inc = defense.incomingInfo();
     $('wave').textContent = game.wave;
+    $('stage').textContent = game.stage;
+    $('specials').classList.toggle('hidden', !meta.stagesCleared);
+    const rk = game.runes.slots.join(',');
+    if (this._rk !== rk) {
+      this._rk = rk;
+      $('runebar').innerHTML = game.runes.slots.map(id => `<span class="rb-slot" title="${id ? RUNES[id].name + ': ' + RUNES[id].desc : 'Empty rune slot'}">${id ? runeIcon(id, RUNES[id].color, RUNE_TIER_COLORS[RUNES[id].tier]) : '<svg viewBox="0 0 100 100"><polygon points="50,4 90,27 90,73 50,96 10,73 10,27" fill="none" stroke="#445" stroke-width="5" stroke-dasharray="8 6"/></svg>'}</span>`).join('');
+    }
     $('wavetimer').textContent = inc.active ? '· spawning' : inc.waiting ? '· halted' : !inc.moreWaves ? '· last wave' : `· next in ${Math.max(0, Math.ceil(inc.timer))}s`;
     $('btn-call').disabled = inc.active || inc.waiting || !inc.moreWaves;
 
