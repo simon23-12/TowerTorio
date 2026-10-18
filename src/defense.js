@@ -11,9 +11,9 @@ const NV = 20;          // max vision sources in the fog shader
 const FOG_Y = 4.4;      // height of the fog plane
 
 export const ENEMY_TYPES = {
-  crawler:  { name: 'Crawler',  hp: 14,   speed: 2.4, dmg: 4,  range: 1.4, atkRate: 1.0, reward: 4,   leak: 1,  color: '#ff5a4a', desc: 'Swarming bug. Weak alone, dangerous in numbers. Chews on any tower it passes.' },
+  crawler:  { name: 'Crawler',  hp: 14,   speed: 2.4, dmg: 3,  range: 1.4, atkRate: 1.0, reward: 4,   leak: 1,  color: '#ff5a4a', desc: 'Swarming bug. Weak alone, dangerous in numbers. Chews on any tower it passes.' },
   runner:   { name: 'Runner',   hp: 9,    speed: 4.6, dmg: 0,  range: 0,   atkRate: 0,   reward: 5,   leak: 1,  color: '#ffa040', ignoresTowers: true, desc: 'Fast and fragile. Ignores towers and sprints straight for the core.' },
-  brute:    { name: 'Brute',    hp: 120,  speed: 1.4, dmg: 10, range: 1.8, atkRate: 0.6, reward: 20,  leak: 3,  color: '#c080ff', desc: 'Armored juggernaut. Hunts down towers and smashes them.' },
+  brute:    { name: 'Brute',    hp: 120,  speed: 1.4, dmg: 8,  range: 1.8, atkRate: 0.6, reward: 20,  leak: 3,  color: '#c080ff', desc: 'Armored juggernaut. Hunts down towers and smashes them.' },
   spitter:  { name: 'Spitter',  hp: 35,   speed: 2.0, dmg: 8,  range: 9,   atkRate: 0.5, reward: 8,   leak: 2,  color: '#60ff60', ranged: true, desc: 'Lobs acid at towers from long range. Kill it before it gets close.' },
   colossus: { name: 'Colossus', hp: 1200, speed: 1.0, dmg: 45, range: 2.6, atkRate: 0.5, reward: 150, leak: 12, color: '#ff40c0', boss: true, desc: 'Boss of every 10th wave. Brings the walls down.' },
 };
@@ -240,31 +240,42 @@ void main() {
 }`;
 
 // ---------- the map ----------
+// The corridor runs along +x in world space; the camera looks "up" it, so on screen
+// enemies come from the top and the core sits at the bottom.
 export class Defense {
   constructor(attract = false) {
     this.attract = attract;
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x020308);
     this.camera = new THREE.PerspectiveCamera(48, innerWidth / innerHeight, 0.5, 400);
-    this.camX = 14; this.zoom = 1.35; this.time = 0; this.shake = 0;
+    this.rect = { x: 0, y: 0, w: innerWidth, h: innerHeight };
+    this.camX = 7; this.zoom = 1.25; this.time = 0; this.shake = 0;
     this.enemies = []; this.arrows = []; this.spits = []; this.bolts = []; this.particles = []; this.fx = [];
     this.wave = 0; this.waveTimer = attract ? 1 : 40; this.waveActive = false;
     this.spawnQueue = []; this.spawnTimer = 0; this.bonusPending = 0;
     this.energy = 0; this.slowT = 0; this.overT = 0; this.hail = null;
-    this.sectorState = new Array(SECTORS).fill(0);
-    this.sectorState[0] = 1;
-    this.selected = null; this.hoverPad = null;
+    this.cleared = 0;                                 // sectors 1..cleared have had a tower
+    this.towers = new Array(SECTORS).fill(null);      // one tower per sector
+    this.rubble = new Array(SECTORS).fill(null);
+    this.sectorState = new Array(SECTORS).fill(0);    // 0 dark, 1 fog, 2 clear
+    this.selected = null; this.hover = null;
     this.lastTowerHit = -99; this.lastHitSector = 0;
     this.keys = new Set();
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
+    this.floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
     this._buildWorld();
-    this._buildPads();
     this._buildFog();
+    this._buildGhost();
+    this.lights = Array.from({ length: SECTORS }, () => {
+      const l = new THREE.PointLight(0xffc080, 0, 28, 1.4);
+      this.scene.add(l);
+      return l;
+    });
     if (attract) {
-      this.sectorState.fill(1);
-      [0, 1, 3, 4, 6].forEach(i => this._placeTower(this.pads[i]));
+      for (let i = 0; i < 5; i++) this._placeTower(i, i * SL + SL * (0.3 + Math.random() * 0.4), (Math.random() - 0.5) * 8);
     }
+    this.refreshSectors();
     this.updateCamera(0);
   }
 
@@ -277,7 +288,7 @@ export class Defense {
     const s = this.scene;
     s.add(new THREE.AmbientLight(0x5a6490, 2.4));
     const moon = new THREE.DirectionalLight(0x99aaff, 2.0);
-    moon.position.set(30, 60, 40);
+    moon.position.set(-20, 60, 30);
     s.add(moon);
     s.add(new THREE.HemisphereLight(0x223355, 0x100805, 0.6));
 
@@ -313,10 +324,11 @@ export class Defense {
       s.add(line);
     }
     for (let i = 0; i < SECTORS; i++) {
-      const lab = new THREE.Mesh(new THREE.PlaneGeometry(7, 1.75),
+      // text lies on the floor, readable from the camera looking up the corridor
+      const lab = new THREE.Mesh(new THREE.PlaneGeometry(7, 1.75).rotateX(-Math.PI / 2),
         basic(0xffffff, { map: textTexture(`SECTOR ${i + 1}`, '#4f7fd0'), transparent: true, opacity: 0.55, depthWrite: false }));
-      lab.rotation.x = -Math.PI / 2;
-      lab.position.set(i * SL + SL / 2, 0.03, -HW + 1.3);
+      lab.rotation.y = -Math.PI / 2;
+      lab.position.set(i * SL + 2.2, 0.03, 0);
       s.add(lab);
     }
 
@@ -348,34 +360,6 @@ export class Defense {
     s.add(this.portal);
   }
 
-  _buildPads() {
-    this.pads = [];
-    this.padMeshes = [];
-    const baseMat = std(0x2a2d36, 0, 0, { roughness: 0.6, metalness: 0.4 });
-    for (let s = 0; s < SECTORS; s++) {
-      for (const [fx, z] of [[0.3, 5.3], [0.7, -5.3]]) {
-        const x = s * SL + SL * fx;
-        const g = new THREE.Group();
-        g.position.set(x, 0, z);
-        const base = mesh(new THREE.CylinderGeometry(1.6, 1.75, 0.2, 6), baseMat, 1, 1, 1, 0, 0.1, 0);
-        const ringMat = basic(0x40c0ff);
-        const ring = new THREE.Mesh(new THREE.TorusGeometry(1.45, 0.07, 6, 6), ringMat);
-        ring.rotation.x = Math.PI / 2;
-        ring.rotation.z = Math.PI / 6;
-        ring.position.y = 0.22;
-        g.add(base, ring);
-        this.scene.add(g);
-        const light = new THREE.PointLight(0xffc080, 0, 28, 1.4);
-        light.position.set(x, 7.5, z);
-        this.scene.add(light);
-        const pad = { sector: s, x, z, group: g, ring, ringMat, tower: null, light, rubble: null };
-        g.userData.pad = pad;
-        this.pads.push(pad);
-        this.padMeshes.push(g);
-      }
-    }
-  }
-
   _buildFog() {
     this.fogMat = new THREE.ShaderMaterial({
       transparent: true, depthWrite: false,
@@ -396,16 +380,57 @@ export class Defense {
     this.scene.add(fog);
   }
 
-  // ----- visibility -----
-  visionSources() {
-    const out = [[-3, 0, 9]];
-    const S = this.stats();
-    for (const p of this.pads) if (p.tower?.alive) out.push([p.x, p.z, S.range + 3]);
-    return out;
+  _buildGhost() {
+    const g = new THREE.Group();
+    this.ghostMat = basic(0x40ff80, { transparent: true, opacity: 0.35, depthWrite: false });
+    g.add(mesh(G.cyl, this.ghostMat, 1.25, 0.6, 1.25, 0, 0.3, 0));
+    g.add(mesh(G.cyl, this.ghostMat, 0.62, 3.0, 0.62, 0, 2.0, 0));
+    g.add(mesh(G.cyl, this.ghostMat, 1.0, 0.35, 1.0, 0, 3.6, 0));
+    this.ghostCanvas = document.createElement('canvas');
+    this.ghostCanvas.width = 256; this.ghostCanvas.height = 96;
+    this.ghostTex = new THREE.CanvasTexture(this.ghostCanvas);
+    this.ghostTex.colorSpace = THREE.SRGBColorSpace;
+    const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.ghostTex, depthTest: false, transparent: true }));
+    label.scale.set(4, 1.5, 1);
+    label.position.y = 5.6;
+    label.renderOrder = 20;
+    g.add(label);
+    g.visible = false;
+    this.ghost = g;
+    this.ghostLabel = '';
+    this.scene.add(g);
   }
-  inVision(x, z) {
-    for (const [vx, vz, r] of this._vision) if (Math.hypot(x - vx, z - vz) < r * 0.82) return true;
-    return false;
+
+  _setGhostLabel(text, ok) {
+    const key = text + ok;
+    if (key === this.ghostLabel) return;
+    this.ghostLabel = key;
+    const c = this.ghostCanvas.getContext('2d');
+    c.clearRect(0, 0, 256, 96);
+    c.fillStyle = 'rgba(5,8,16,0.8)';
+    c.beginPath(); c.roundRect(8, 14, 240, 68, 14); c.fill();
+    c.strokeStyle = ok ? '#40ff80' : '#ff5050';
+    c.lineWidth = 3; c.stroke();
+    c.font = 'bold 40px Orbitron, sans-serif';
+    c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillStyle = ok ? '#ffd046' : '#ff6060';
+    c.fillText(text, 128, 50);
+    this.ghostTex.needsUpdate = true;
+    this.ghostMat.color.setHex(ok ? 0x40ff80 : 0xff4040);
+  }
+
+  // ----- sectors -----
+  // Sectors 1..k are cleared. After clearing at least one, the next sector is lit too,
+  // the one after that is foggy, and everything beyond is pitch black.
+  refreshSectors() {
+    const k = this.cleared;
+    for (let i = 0; i < SECTORS; i++) {
+      let st = 0;
+      if (i < k) st = 2;
+      else if (i === k) st = k >= 1 ? 2 : 1;
+      else if (i === k + 1) st = 1;
+      this.sectorState[i] = st;
+    }
   }
   stateAtX(x) {
     const i = Math.floor(x / SL);
@@ -413,33 +438,47 @@ export class Defense {
     if (i >= SECTORS) return 0;
     return this.sectorState[i];
   }
+  sectorOf(x) { return Math.max(0, Math.min(SECTORS - 1, Math.floor(x / SL))); }
+  canBuildSector(i) { return i >= 0 && i < SECTORS && i <= this.cleared && !this.towers[i]?.alive; }
 
   // ----- towers -----
-  aliveTowers() { return this.pads.filter(p => p.tower?.alive).length; }
+  aliveTowers() { return this.towers.filter(t => t?.alive).length; }
   towerCost() { return 20 + 15 * this.aliveTowers(); }
 
-  buildTower(pad) {
-    if (this.sectorState[pad.sector] < 1) { toast('That sector is still shrouded in darkness', 'bad'); emit('sfx', 'error'); return; }
-    if (pad.tower?.alive) return;
+  buildAt(x, z) {
+    const s = Math.floor(x / SL);
+    if (s < 0 || s >= SECTORS) return;
+    if (this.towers[s]?.alive) return;
+    if (!this.canBuildSector(s)) {
+      toast(s > 0 ? `Clear Sector ${s} first — build a tower there` : 'Cannot build here', 'bad');
+      emit('sfx', 'error');
+      return;
+    }
     if (!spend(this.towerCost())) return;
-    this._placeTower(pad);
+    const p = this._clampInSector(s, x, z);
+    this._placeTower(s, p.x, p.z);
     emit('sfx', 'build');
     game.flags.towerBuilt = true;
-    this.selected = pad;
+    this.selected = this.towers[s];
   }
 
-  _placeTower(pad) {
-    if (pad.rubble) { this.scene.remove(pad.rubble); pad.rubble = null; }
+  _clampInSector(s, x, z) {
+    return { x: Math.max(s * SL + 1.8, Math.min((s + 1) * SL - 1.8, x)), z: Math.max(-HW + 1.8, Math.min(HW - 1.8, z)) };
+  }
+
+  _placeTower(s, x, z, hp) {
+    if (this.rubble[s]) { this.scene.remove(this.rubble[s]); this.rubble[s] = null; }
     const m = buildTowerMesh();
-    m.group.position.set(pad.x, 0.2, pad.z);
+    m.group.position.set(x, 0, z);
     this.scene.add(m.group);
     const S = this.stats();
-    pad.tower = { pad, mesh: m, hp: S.maxHP, maxHP: S.maxHP, cd: Math.random() * 0.5, alive: true, flash: 0 };
-    pad.light.intensity = 70;
-    const next = pad.sector + 1;
-    if (next < SECTORS && this.sectorState[next] < 1) {
-      this.sectorState[next] = 1;
-      if (!this.attract) toast(`Sector ${next + 1} revealed — the darkness recedes`, 'good');
+    this.towers[s] = { sector: s, x, z, mesh: m, hp: hp ?? S.maxHP, maxHP: S.maxHP, cd: Math.random() * 0.5, alive: true, flash: 0 };
+    this.lights[s].position.set(x, 7.5, z);
+    this.lights[s].intensity = 70;
+    if (s === this.cleared) {
+      this.cleared++;
+      this.refreshSectors();
+      if (!this.attract && s + 1 < SECTORS) toast(`Sector ${s + 1} cleared — the fog lifts from Sector ${s + 2}`, 'good');
     }
   }
 
@@ -447,24 +486,25 @@ export class Defense {
     if (!t.alive) return;
     t.hp -= dmg;
     t.flash = 0.15;
-    if (!this.attract) { this.lastTowerHit = game.time; this.lastHitSector = t.pad.sector; }
+    if (!this.attract) { this.lastTowerHit = game.time; this.lastHitSector = t.sector; }
     if (t.hp <= 0) this._destroyTower(t);
   }
 
   _destroyTower(t) {
     t.alive = false;
-    const pad = t.pad;
+    const s = t.sector;
     this.scene.remove(t.mesh.group);
-    pad.rubble = buildRubble();
-    pad.rubble.position.set(pad.x, 0.2, pad.z);
-    this.scene.add(pad.rubble);
-    pad.light.intensity = 0;
-    this._burst(pad.x, 3, pad.z, 0x8a8070, 40, 6);
-    this._burst(pad.x, 3, pad.z, 0xffa040, 20, 8);
+    this.rubble[s] = buildRubble();
+    this.rubble[s].position.set(t.x, 0, t.z);
+    this.scene.add(this.rubble[s]);
+    this.lights[s].intensity = 0;
+    if (this.selected === t) this.selected = null;
+    this._burst(t.x, 3, t.z, 0x8a8070, 40, 6);
+    this._burst(t.x, 3, t.z, 0xffa040, 20, 8);
     this.shake = 0.6;
-    if (this.attract) { setTimeout(() => { if (!pad.tower?.alive) this._placeTower(pad); }, 5000); return; }
+    if (this.attract) { setTimeout(() => { if (!this.towers[s]?.alive) this._placeTower(s, t.x, t.z); }, 5000); return; }
     emit('sfx', 'destroyed');
-    toast(`Tower in Sector ${pad.sector + 1} was destroyed! Strengthen it in the Factory.`, 'bad');
+    toast(`Tower in Sector ${s + 1} was destroyed! Strengthen it in the Factory.`, 'bad');
   }
 
   // ----- waves -----
@@ -489,7 +529,6 @@ export class Defense {
     const q = [];
     for (const [type, n] of Object.entries(comp)) if (type !== 'colossus') for (let i = 0; i < n; i++) q.push(type);
     for (let i = q.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [q[i], q[j]] = [q[j], q[i]]; }
-    // the first few are always crawlers so the wave "announces" itself
     for (let k = 0, moved = 0; k < q.length && moved < 3; k++) {
       if (q[k] === 'crawler') { q.splice(moved, 0, q.splice(k, 1)[0]); moved++; }
     }
@@ -568,7 +607,7 @@ export class Defense {
       m = new THREE.Mesh(G.bolt, arrowMats[tier]);
       m.scale.setScalar(1 + tier * 0.12);
     }
-    m.position.set(t.pad.x, 4.8, t.pad.z);
+    m.position.set(t.x, 4.6, t.z);
     this.scene.add(m);
     this.arrows.push({ mesh: m, target: e, tx: e.x, tz: e.z, speed: S.projSpeed, dmg: S.damage * (crit ? S.critMul : 1), crit });
   }
@@ -576,7 +615,7 @@ export class Defense {
   _spit(e, t) {
     const m = mesh(G.sphere, M.spit, 0.22);
     this.scene.add(m);
-    const from = new THREE.Vector3(e.x, 1.2, e.z), to = new THREE.Vector3(t.pad.x, 2.5, t.pad.z);
+    const from = new THREE.Vector3(e.x, 1.2, e.z), to = new THREE.Vector3(t.x, 2.5, t.z);
     this.spits.push({ mesh: m, from, to, t: 0, dur: from.distanceTo(to) / 9, target: t, dmg: e.T.dmg * this.dmgMul() });
   }
 
@@ -607,7 +646,7 @@ export class Defense {
     if (S.energyTier < sp.req) { toast(`${sp.name} needs Energy Tier ${sp.req} (Voltarite)`, 'bad'); emit('sfx', 'error'); return; }
     if (this.energy < sp.cost) { toast(`Not enough energy for ${sp.name}`, 'bad'); emit('sfx', 'error'); return; }
     if (id === 'hail') {
-      const vis = this.enemies.filter(e => this.inVision(e.x, e.z));
+      const vis = this.enemies.filter(e => this.stateAtX(e.x) === 2);
       if (!vis.length) { toast('No visible enemies to target', 'bad'); return; }
       let best = vis[0], bestN = -1;
       for (const e of vis) {
@@ -626,9 +665,7 @@ export class Defense {
   update(dt) {
     this.time += dt;
     const S = this.stats();
-    this._vision = this.visionSources();
 
-    // waves
     if (!this.waveActive) {
       this.waveTimer -= dt;
       if (this.waveTimer <= 0) this.startWave();
@@ -645,7 +682,6 @@ export class Defense {
       this.bonusPending = 0;
     }
 
-    // energy & specials
     if (S.energyMax > 0) this.energy = Math.min(S.energyMax, this.energy + S.energyRegen * dt);
     else this.energy = 0;
     this.slowT = Math.max(0, this.slowT - dt);
@@ -666,30 +702,16 @@ export class Defense {
       if (this.hail.left <= 0) this.hail = null;
     }
 
-    this._updateEnemies(dt, S);
+    this._updateEnemies(dt);
     this._updateTowers(dt, S);
     this._updateProjectiles(dt);
     this._updateFx(dt);
 
-    // pads
-    const pulse = 0.6 + 0.4 * Math.sin(this.time * 3);
-    for (const p of this.pads) {
-      const st = this.sectorState[p.sector];
-      let col;
-      if (p.tower?.alive) col = this.selected === p ? 0xffffff : 0x305878;
-      else if (st < 1) col = 0x101418;
-      else if (p.tower) col = new THREE.Color(0xff5030).multiplyScalar(pulse).getHex();
-      else col = new THREE.Color(this.hoverPad === p ? 0xa0f0ff : 0x40c0ff).multiplyScalar(this.hoverPad === p ? 1 : pulse).getHex();
-      p.ringMat.color.setHex(col);
-    }
-
-    // fog uniforms
     const u = this.fogMat.uniforms;
     u.uTime.value = this.time;
     for (let i = 0; i < SECTORS; i++) u.uState.value[i] = this.sectorState[i];
-    const n = Math.min(NV, this._vision.length);
-    for (let i = 0; i < n; i++) u.uVision.value[i].set(...this._vision[i]);
-    u.uCount.value = n;
+    u.uVision.value[0].set(-3, 0, 9);
+    u.uCount.value = 1;
 
     this.coreCrystal.rotation.y += dt;
     this.coreCrystal.position.y = 2.4 + Math.sin(this.time * 1.5) * 0.2;
@@ -697,25 +719,20 @@ export class Defense {
     this.portal.children[0].rotation.x += dt * 0.8;
   }
 
-  _updateEnemies(dt, S) {
+  _updateEnemies(dt) {
     const slow = this.slowT > 0 ? 0.4 : 1;
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       const e = this.enemies[i], T = e.T;
       let spd = T.speed * slow;
       if (this.stateAtX(e.x) === 0) spd *= 3; // they rush through the darkness
       e.atkCd -= dt;
-      let target = null, td = 1e9;
-      if (!T.ignoresTowers) {
-        const aggro = T.ranged ? T.range + 1.5 : (T.boss ? 8 : 5.5);
-        for (const p of this.pads) {
-          if (!p.tower?.alive) continue;
-          const d = Math.hypot(p.x - e.x, p.z - e.z);
-          if (d < aggro && d < td) { td = d; target = p.tower; }
-        }
-      }
+      // every tower-hunting enemy goes for the tower of the sector it is in
+      const sec = Math.floor(e.x / SL);
+      const tw = sec >= 0 && sec < SECTORS ? this.towers[sec] : null;
+      const target = !T.ignoresTowers && tw?.alive ? tw : null;
       let vx = 0, vz = 0;
       if (target) {
-        const dx = target.pad.x - e.x, dz = target.pad.z - e.z;
+        const dx = target.x - e.x, dz = target.z - e.z, td = Math.hypot(dx, dz);
         if (td > T.range + 1.4) { vx = dx / td; vz = dz / td; }
         else {
           e.body.rotation.y = Math.atan2(-dz, dx);
@@ -723,7 +740,7 @@ export class Defense {
             e.atkCd = 1 / T.atkRate;
             e.lunge = 0.25;
             if (T.ranged) this._spit(e, target);
-            else { this._damageTower(target, T.dmg * this.dmgMul()); this._burst(target.pad.x, 1.5, target.pad.z, 0x9a9080, 4, 3); }
+            else { this._damageTower(target, T.dmg * this.dmgMul()); this._burst(target.x, 1.5, target.z, 0x9a9080, 4, 3); }
           }
         }
       } else {
@@ -734,7 +751,6 @@ export class Defense {
       e.z = Math.max(-HW + 1, Math.min(HW - 1, e.z + vz * spd * dt));
       if (vx || vz) e.body.rotation.y = Math.atan2(-vz, vx);
 
-      // animation
       const moving = vx || vz;
       e.phase += dt * (moving ? spd * 4 : 2);
       for (const l of e.legs) l.rotation.z = moving ? Math.sin(e.phase + (l.userData.side > 0 ? 0 : Math.PI)) * 0.6 : 0;
@@ -746,9 +762,9 @@ export class Defense {
       e.body.scale.setScalar(e.flash > 0 ? 1.12 : 1);
       e.bar.quaternion.copy(this.camera.quaternion);
 
-      const vis = this.inVision(e.x, e.z);
-      e.root.visible = vis || this.stateAtX(e.x) >= 1;
-      if (vis && !this.attract && !game.discovered.has(e.type)) {
+      const st = this.stateAtX(e.x);
+      e.root.visible = st >= 1;
+      if (st === 2 && !this.attract && !game.discovered.has(e.type)) {
         game.discovered.add(e.type);
         toast(`New enemy identified: ${T.name} — ${T.desc}`, 'warn');
         emit('discover', e.type);
@@ -772,15 +788,16 @@ export class Defense {
   _updateTowers(dt, S) {
     const rate = this.overT > 0 ? 2.5 : 1;
     const crystalCol = ARROW_COLORS[Math.min(ARROW_COLORS.length - 1, S.attackTier)];
-    for (const p of this.pads) {
-      const t = p.tower;
+    for (const t of this.towers) {
       if (!t?.alive) continue;
       if (S.maxHP > t.maxHP) t.hp += S.maxHP - t.maxHP;
       t.maxHP = S.maxHP;
       t.hp = Math.min(t.maxHP, t.hp + S.regen * dt);
       t.cd -= dt * rate;
       if (t.cd <= 0) {
-        const inRange = this.enemies.filter(e => Math.hypot(e.x - p.x, e.z - p.z) <= S.range);
+        // a tower covers its whole sector (plus some reach), wherever it stands
+        const lo = t.sector * SL - S.reach, hi = (t.sector + 1) * SL + S.reach;
+        const inRange = this.enemies.filter(e => e.x >= lo && e.x <= hi);
         if (inRange.length) {
           inRange.sort((a, b) => a.x - b.x);
           for (const e of inRange.slice(0, S.weapons)) this._fire(t, e, S);
@@ -799,10 +816,10 @@ export class Defense {
       });
       setBar(m.bar, t.hp / t.maxHP);
       m.bar.quaternion.copy(this.camera.quaternion);
-      m.bar.visible = t.hp < t.maxHP || this.selected === p;
+      m.bar.visible = t.hp < t.maxHP || this.selected === t || this.hover?.tower === t;
       t.flash = Math.max(0, t.flash - dt);
-      m.group.position.x = p.x + (t.flash > 0 ? (Math.random() - 0.5) * 0.15 : 0);
-      p.light.color.setHex(crystalCol);
+      m.group.position.x = t.x + (t.flash > 0 ? (Math.random() - 0.5) * 0.15 : 0);
+      this.lights[t.sector].color.setHex(crystalCol);
     }
   }
 
@@ -880,54 +897,71 @@ export class Defense {
       this.zoom = 1.05;
     } else {
       const pan = 40 * this.zoom * dt;
-      if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) this.camX -= pan;
-      if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) this.camX += pan;
-      this.camX = Math.max(-4, Math.min(L, this.camX));
+      if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) this.camX += pan;
+      if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) this.camX -= pan;
+      this.camX = Math.max(-2, Math.min(L, this.camX));
     }
     const d = 24 * this.zoom;
     this.shake = Math.max(0, this.shake - dt * 2);
     const sx = (Math.random() - 0.5) * this.shake, sy = (Math.random() - 0.5) * this.shake;
-    this.camera.position.set(this.camX + sx, d + sy, d * 0.78 + 1);
-    this.camera.lookAt(this.camX + sx, 0, 0.8);
+    this.camera.position.set(this.camX - d * 0.72, d + sy, sx);
+    this.camera.lookAt(this.camX + 2, 0, sx);
+  }
+
+  _ndc(ev) {
+    const r = this.rect;
+    this.pointer.set((ev.clientX - r.x) / r.w * 2 - 1, -((ev.clientY - r.y) / r.h) * 2 + 1);
+    this.raycaster.setFromCamera(this.pointer, this.camera);
   }
 
   _pick(ev) {
-    this.pointer.set(ev.clientX / innerWidth * 2 - 1, -(ev.clientY / innerHeight) * 2 + 1);
-    this.raycaster.setFromCamera(this.pointer, this.camera);
-    const hit = this.raycaster.intersectObjects(this.padMeshes, true)[0];
-    let o = hit?.object;
-    while (o && !o.userData.pad) o = o.parent;
-    if (o) return o.userData.pad;
-    // also allow clicking the tower body above the pad
-    for (const p of this.pads) {
-      if (!p.tower?.alive) continue;
-      const hits = this.raycaster.intersectObject(p.tower.mesh.group, true);
-      if (hits.length) return p;
+    this._ndc(ev);
+    for (const t of this.towers) {
+      if (t?.alive && this.raycaster.intersectObject(t.mesh.group, true).length) return { tower: t, x: t.x, z: t.z, sector: t.sector };
     }
-    return null;
+    const p = new THREE.Vector3();
+    if (!this.raycaster.ray.intersectPlane(this.floorPlane, p)) return null;
+    const inside = Math.abs(p.z) < HW && p.x >= 0 && p.x < L;
+    if (!inside) return null;
+    const sector = Math.floor(p.x / SL);
+    const t = this.towers[sector];
+    if (t?.alive && Math.hypot(t.x - p.x, t.z - p.z) < 2) return { tower: t, x: p.x, z: p.z, sector };
+    return { x: p.x, z: p.z, sector };
   }
 
-  onPointerDown(ev) { this.drag = { x: ev.clientX, y: ev.clientY, camX: this.camX, moved: false }; }
+  onPointerDown(ev) { this.drag = { y: ev.clientY, camX: this.camX, moved: false }; }
   onPointerMove(ev) {
     if (this.drag && (ev.buttons & 1)) {
-      const dx = ev.clientX - this.drag.x;
-      if (Math.abs(dx) > 5) this.drag.moved = true;
-      const dist = 24 * this.zoom * 1.27;
-      const worldW = 2 * dist * Math.tan(THREE.MathUtils.degToRad(24)) * this.camera.aspect;
-      this.camX = Math.max(-4, Math.min(L, this.drag.camX - dx * worldW / innerWidth));
+      const dy = ev.clientY - this.drag.y;
+      if (Math.abs(dy) > 5) this.drag.moved = true;
+      const worldH = 2 * 24 * this.zoom * 1.23 * Math.tan(THREE.MathUtils.degToRad(24)) * 1.4;
+      this.camX = Math.max(-2, Math.min(L, this.drag.camX + dy * worldH / this.rect.h));
     }
-    this.hoverPad = this._pick(ev);
-    const p = this.hoverPad;
-    document.body.style.cursor = p && this.sectorState[p.sector] >= 1 ? 'pointer' : '';
+    this.hover = this._pick(ev);
+    this._updateGhost();
+    const h = this.hover;
+    document.body.style.cursor = h && (h.tower || this.canBuildSector(h.sector)) ? 'pointer' : '';
   }
+  _updateGhost() {
+    const h = this.hover;
+    if (!h || h.tower || !this.canBuildSector(h.sector) || this.drag?.moved) { this.ghost.visible = false; return; }
+    const p = this._clampInSector(h.sector, h.x, h.z);
+    this.ghost.visible = true;
+    this.ghost.position.set(p.x, 0, p.z);
+    const cost = this.towerCost();
+    this._setGhostLabel(`${cost} ◈`, game.credits >= cost);
+  }
+  onPointerLeave() { this.hover = null; this.ghost.visible = false; }
   onPointerUp(ev) {
     const d = this.drag;
     this.drag = null;
     if (!d || d.moved || ev.button !== 0) return;
-    const pad = this._pick(ev);
-    if (!pad) { this.selected = null; return; }
-    if (pad.tower?.alive) { this.selected = this.selected === pad ? null : pad; emit('sfx', 'click'); }
-    else this.buildTower(pad);
+    const h = this._pick(ev);
+    if (!h) { this.selected = null; return; }
+    if (h.tower) { this.selected = this.selected === h.tower ? null : h.tower; emit('sfx', 'click'); return; }
+    if (this.towers[h.sector]?.alive) { this.selected = this.towers[h.sector]; return; }
+    this.buildAt(h.x, h.z);
+    this._updateGhost();
   }
   onWheel(ev) { this.zoom = Math.max(0.6, Math.min(2.4, this.zoom * (ev.deltaY > 0 ? 1.1 : 0.9))); }
   onKey(code) {
@@ -936,32 +970,78 @@ export class Defense {
     if (code === 'KeyN') this.callWave();
     if (code === 'Escape') this.selected = null;
   }
-  focusSector(i) { this.camX = i * SL + SL / 2; }
+  focusSector(i) { this.camX = i * SL + SL / 2 - 4; }
+
+  _towerLines(t) {
+    const S = this.stats();
+    return [
+      ['HP', `${Math.ceil(t.hp)} / ${Math.round(t.maxHP)}  (+${S.regen.toFixed(1)}/s)`],
+      ['Damage', `${S.damage.toFixed(1)} per shot`],
+      ['Fire rate', `${S.fireRate.toFixed(2)} /s × ${S.weapons} weapon${S.weapons > 1 ? 's' : ''}`],
+      ['Coverage', `Sector ${t.sector + 1} + ${S.reach.toFixed(1)} m`],
+      ['Crit', `${Math.round(S.crit * 100)}% for ×${S.critMul.toFixed(2)}`],
+    ];
+  }
 
   getPanel() {
-    const p = this.selected;
-    if (!p?.tower?.alive) return null;
-    const S = this.stats(), t = p.tower;
+    const t = this.selected;
+    if (!t?.alive) return null;
     return {
-      title: `Watchtower · Sector ${p.sector + 1}`,
-      lines: [
-        ['HP', `${Math.ceil(t.hp)} / ${Math.round(t.maxHP)}  (+${S.regen.toFixed(1)}/s)`],
-        ['Damage', `${S.damage.toFixed(1)} per shot`],
-        ['Fire rate', `${S.fireRate.toFixed(2)} /s × ${S.weapons} weapon${S.weapons > 1 ? 's' : ''}`],
-        ['Range', `${S.range.toFixed(1)} m`],
-        ['Crit', `${Math.round(S.crit * 100)}% for ×${S.critMul.toFixed(2)}`],
-      ],
-      note: 'All towers share the stats supplied by the Factory teleporter.',
+      title: `Watchtower · Sector ${t.sector + 1}`,
+      lines: this._towerLines(t),
+      note: 'All towers share the stats supplied by the Factory teleporters. A tower covers its whole sector wherever it stands.',
       buttons: [{ label: 'Close', action: 'close' }],
     };
   }
   panelAction(a) { if (a === 'close') this.selected = null; }
 
+  getHoverInfo() {
+    const h = this.hover;
+    if (!h || this.drag?.moved) return null;
+    if (h.tower) return { title: `Watchtower · Sector ${h.sector + 1}`, lines: this._towerLines(h.tower) };
+    const n = h.sector + 1;
+    if (this.towers[h.sector]?.alive) return null;
+    if (this.canBuildSector(h.sector)) {
+      const cost = this.towerCost();
+      return {
+        title: this.rubble[h.sector] ? `Rebuild Watchtower · Sector ${n}` : `Build Watchtower · Sector ${n}`,
+        lines: [['Cost', `${cost} ◈`], ['You have', `${Math.floor(game.credits)} ◈`]],
+        note: 'One tower per sector. Placement inside the sector does not matter.',
+      };
+    }
+    return { title: `Sector ${n}`, lines: [['Status', this.sectorState[h.sector] ? 'Fog of war' : 'Pitch dark']], note: `Clear Sector ${n - 1} first by building a tower there.` };
+  }
+
   sectorInfo() {
     return this.sectorState.map((st, i) => {
       const known = this.enemies.filter(e => e.root.visible && Math.floor(e.x / SL) === i).length;
-      const towers = this.pads.filter(p => p.sector === i && p.tower?.alive).length;
-      return { state: st, known, towers, center: i * SL + SL / 2 };
+      return { state: st, known, tower: !!this.towers[i]?.alive, ruin: !!this.rubble[i], center: i * SL + SL / 2 };
     });
+  }
+
+  // ----- save / load -----
+  serialize() {
+    return {
+      wave: this.wave, waveTimer: Math.max(15, this.waveTimer), cleared: this.cleared, energy: this.energy, camX: this.camX,
+      towers: this.towers.map(t => t && { x: t.x, z: t.z, alive: t.alive, hp: t.hp }),
+    };
+  }
+  load(d) {
+    this.wave = d.wave;
+    this.waveTimer = d.waveTimer;
+    this.energy = d.energy || 0;
+    this.camX = d.camX ?? this.camX;
+    d.towers.forEach((t, s) => {
+      if (!t) return;
+      if (t.alive) this._placeTower(s, t.x, t.z, t.hp);
+      else {
+        this.rubble[s] = buildRubble();
+        this.rubble[s].position.set(t.x, 0, t.z);
+        this.scene.add(this.rubble[s]);
+        this.towers[s] = { sector: s, x: t.x, z: t.z, alive: false };
+      }
+    });
+    this.cleared = Math.max(this.cleared, d.cleared);
+    this.refreshSectors();
   }
 }

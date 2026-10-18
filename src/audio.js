@@ -1,16 +1,25 @@
-// Menu music (compressed Opus with MP3 fallback) + tiny synthesized sound effects.
+// Music (menu track + optional in-game track) and tiny synthesized sound effects.
 import { on } from './state.js';
+
+// In-game music: drop files into assets/ and list them here (Opus first, MP3 fallback),
+// e.g. ['assets/game.ogg', 'assets/game.mp3']. Empty = silence during gameplay.
+export const GAME_MUSIC = [];
+
+const opus = document.createElement('audio').canPlayType('audio/ogg; codecs="opus"');
+function track(srcs) {
+  const src = srcs.find(s => opus || !s.endsWith('.ogg'));
+  if (!src) return null;
+  const a = new Audio(src);
+  a.loop = true;
+  a.preload = 'auto';
+  a.volume = 0;
+  return { el: a, target: 0 };
+}
 
 class AudioManager {
   constructor() {
-    this.music = new Audio();
-    const probe = document.createElement('audio');
-    const opus = probe.canPlayType('audio/ogg; codecs="opus"');
-    this.music.src = opus ? 'assets/menu.ogg' : 'assets/menu.mp3';
-    this.music.loop = true;
-    this.music.preload = 'auto';
-    this.music.volume = 0;
-    this.musicTarget = 0.6;
+    this.tracks = { menu: track(['assets/menu.ogg', 'assets/menu.mp3']), game: track(GAME_MUSIC) };
+    this.current = null;
     this.muted = false;
     this.ctx = null;
     this.last = {};
@@ -33,20 +42,30 @@ class AudioManager {
     if (this.ctx.state === 'suspended') this.ctx.resume();
   }
 
-  playMusic() { this.music.play().catch(() => {}); }
-  setMusicLevel(v) { this.musicTarget = v; }
+  // cross-fade to 'menu', 'game' or null
+  playTrack(name, volume = 0.6) {
+    this.current = name;
+    for (const [k, t] of Object.entries(this.tracks)) {
+      if (!t) continue;
+      t.target = k === name ? volume : 0;
+      if (k === name && t.el.paused) t.el.play().catch(() => {});
+    }
+  }
 
   toggleMute() {
     this.muted = !this.muted;
-    this.music.muted = this.muted;
+    for (const t of Object.values(this.tracks)) if (t) t.el.muted = this.muted;
     if (this.master) this.master.gain.value = this.muted ? 0 : 0.32;
     return this.muted;
   }
 
   update(dt) {
-    const v = this.music.volume, t = this.musicTarget;
-    if (Math.abs(v - t) > 0.005) {
-      try { this.music.volume = Math.max(0, Math.min(1, v + Math.sign(t - v) * Math.min(Math.abs(t - v), dt * 0.5))); } catch (e) { /* iOS: volume is read-only */ }
+    for (const t of Object.values(this.tracks)) {
+      if (!t) continue;
+      const v = t.el.volume;
+      if (Math.abs(v - t.target) > 0.005) {
+        try { t.el.volume = Math.max(0, Math.min(1, v + Math.sign(t.target - v) * Math.min(Math.abs(t.target - v), dt * 0.6))); } catch (e) { /* iOS: volume is read-only */ }
+      } else if (t.target === 0 && !t.el.paused) t.el.pause();
     }
   }
 

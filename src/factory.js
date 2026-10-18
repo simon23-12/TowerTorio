@@ -12,7 +12,9 @@ export const BUILD = {
   belt:     { name: 'Conveyor Belt', cost: 1,  key: '1', icon: '▤', desc: 'Moves items forward. Click-drag to lay a line.' },
   miner:    { name: 'Quarry Drill',  cost: 15, key: '2', icon: '⛏', desc: 'Place on ore. Quarries endlessly and outputs forward.', upg: [40, 120], base: 30 },
   refinery: { name: 'Refinery',      cost: 25, key: '3', icon: '⚗', desc: '2 ore → 1 crystal. Accepts from any side, outputs forward.', upg: [60, 160], base: 30 },
+  teleporter: { name: 'Teleporter',  cost: 150, key: '4', icon: '◎', size: 2, desc: '2×2. Beams crystals to your towers. Accepts from any side. Each extra one costs more.' },
 };
+const sizeOf = type => BUILD[type]?.size || 1;
 const MK_COLORS = [0x8090a0, 0x40e0ff, 0xffc040];
 
 const resColor = RES_KEYS.map(k => new THREE.Color(RESOURCES[k].color));
@@ -54,6 +56,8 @@ export class Factory {
     this.scene.fog = new THREE.Fog(0x07080c, 40, 90);
     this.camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.3, 200);
     this.cx = 32; this.cz = 33; this.dist = 22;
+    this.yaw = 0; this.yawCur = 0;
+    this.rect = { x: 0, y: 0, w: innerWidth, h: innerHeight };
     this.grid = new Array(N * N).fill(null);
     this.ore = new Int8Array(N * N).fill(-1);
     this.buildings = [];
@@ -78,6 +82,8 @@ export class Factory {
     this._initItems();
     this._buildGhost();
     this.teleporter = this._place('teleporter', 31, 31, 0);
+    this.teleporter.fixed = true;
+    this.teleporter.spent = 0;
     this.updateCamera(0);
   }
 
@@ -235,7 +241,7 @@ export class Factory {
         break;
       }
     }
-    const size = b.type === 'teleporter' ? 2 : 1;
+    const size = sizeOf(b.type);
     g.position.set(b.x + size / 2, 0, b.y + size / 2);
     g.rotation.y = -b.dir * Math.PI / 2;
     g.userData.building = b;
@@ -254,7 +260,7 @@ export class Factory {
     if (type === 'teleporter') { b.pulse = 0; b.received = 0; }
     b.mesh = this._buildMesh(b);
     this.scene.add(b.mesh);
-    const size = type === 'teleporter' ? 2 : 1;
+    const size = sizeOf(type);
     for (let j = 0; j < size; j++) for (let i = 0; i < size; i++) this.grid[(y + j) * N + x + i] = b;
     this.buildings.push(b);
     return b;
@@ -262,12 +268,15 @@ export class Factory {
 
   _canPlace(type, x, y, silent) {
     const fail = msg => { if (!silent) { toast(msg, 'bad'); emit('sfx', 'error'); } return false; };
-    if (!this.inBounds(x, y)) return false;
-    if (this.at(x, y)) return silent ? false : fail('Tile is occupied');
+    const size = sizeOf(type);
+    for (let j = 0; j < size; j++) for (let i = 0; i < size; i++) {
+      if (!this.inBounds(x + i, y + j)) return false;
+      if (this.at(x + i, y + j)) return silent ? false : fail('Tile is occupied');
+    }
     if (type === 'miner') {
       const o = this.ore[y * N + x];
       if (o < 0) return fail('Quarry Drills must be placed on ore');
-      if (!game.unlocked[RES_KEYS[o]]) return fail(`Research ${RESOURCES[RES_KEYS[o]].name} Refining first (Research, T)`);
+      if (!game.unlocked[RES_KEYS[o]]) return fail(`Research ${RESOURCES[RES_KEYS[o]].name} Refining first (Research, U)`);
     }
     return true;
   }
@@ -275,16 +284,23 @@ export class Factory {
   tryPlace(x, y, silent = false) {
     const type = this.tool;
     if (!type || !this._canPlace(type, x, y, silent)) return null;
-    if (!spend(BUILD[type].cost)) { this.placing = false; return null; }
+    const cost = this.costOf(type);
+    if (!spend(cost)) { this.placing = false; return null; }
     const b = this._place(type, x, y, this.rot);
+    b.spent = cost;
     emit('sfx', 'place');
     if (type === 'miner') game.flags.minerPlaced = true;
     if (type === 'refinery') game.flags.refineryPlaced = true;
     return b;
   }
 
+  costOf(type) {
+    if (type !== 'teleporter') return BUILD[type].cost;
+    return BUILD.teleporter.cost + 100 * (this.buildings.filter(b => b.type === 'teleporter').length - 1);
+  }
+
   remove(b) {
-    if (!b || b.type === 'teleporter') return;
+    if (!b || b.fixed) return;
     this.scene.remove(b.mesh);
     for (let i = 0; i < N * N; i++) if (this.grid[i] === b) this.grid[i] = null;
     this.buildings.splice(this.buildings.indexOf(b), 1);
@@ -416,7 +432,7 @@ export class Factory {
     const sb = this.selected;
     this.selBox.visible = !!sb;
     if (sb) {
-      const size = sb.type === 'teleporter' ? 2 : 1;
+      const size = sizeOf(sb.type);
       this.selBox.position.set(sb.x + size / 2, 0.55, sb.y + size / 2);
       this.selBox.scale.set(size, size === 2 ? 1.6 : 1, size);
     }
@@ -450,20 +466,33 @@ export class Factory {
   }
 
   // ----- camera & input -----
+  // screen-up and screen-right directions on the ground for the current view rotation
+  _axes() {
+    const c = Math.cos(this.yawCur), s = Math.sin(this.yawCur);
+    return { fx: -s, fz: -c, rx: c, rz: -s, c, s };
+  }
+
+  rotateView() { this.yaw += Math.PI / 2; emit('sfx', 'click'); }
+
   updateCamera(dt) {
+    this.yawCur += (this.yaw - this.yawCur) * Math.min(1, dt * 8);
+    const A = this._axes();
     const pan = this.dist * 1.2 * dt;
-    if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) this.cz -= pan;
-    if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) this.cz += pan;
-    if (this.keys.has('KeyA') || this.keys.has('ArrowLeft')) this.cx -= pan;
-    if (this.keys.has('KeyD') || this.keys.has('ArrowRight')) this.cx += pan;
+    const k = this.keys;
+    const f = (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0);
+    const r = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
+    this.cx += (A.fx * f + A.rx * r) * pan;
+    this.cz += (A.fz * f + A.rz * r) * pan;
     this.cx = Math.max(0, Math.min(N, this.cx));
     this.cz = Math.max(0, Math.min(N, this.cz));
-    this.camera.position.set(this.cx, this.dist, this.cz + this.dist * 0.65);
+    const back = this.dist * 0.65;
+    this.camera.position.set(this.cx + back * A.s, this.dist, this.cz + back * A.c);
     this.camera.lookAt(this.cx, 0, this.cz);
   }
 
   _tileAt(ev) {
-    this.pointer.set(ev.clientX / innerWidth * 2 - 1, -(ev.clientY / innerHeight) * 2 + 1);
+    const R = this.rect;
+    this.pointer.set((ev.clientX - R.x) / R.w * 2 - 1, -((ev.clientY - R.y) / R.h) * 2 + 1);
     this.raycaster.setFromCamera(this.pointer, this.camera);
     const p = new THREE.Vector3();
     if (!this.raycaster.ray.intersectPlane(this.groundPlane, p)) return null;
@@ -474,9 +503,12 @@ export class Factory {
     const h = this.hover;
     if (!this.tool || !h || !this.inBounds(h.x, h.y)) { this.ghost.visible = false; return; }
     this.ghost.visible = true;
-    this.ghost.position.set(h.x + 0.5, 0, h.y + 0.5);
-    this.ghost.rotation.y = -this.rot * Math.PI / 2;
-    const ok = this._canPlace(this.tool, h.x, h.y, true) && game.credits >= BUILD[this.tool].cost;
+    const size = sizeOf(this.tool);
+    this.ghost.position.set(h.x + size / 2, 0, h.y + size / 2);
+    this.ghost.scale.set(size, 1, size);
+    this.ghostArrow.visible = size === 1;
+    this.ghost.rotation.y = size === 1 ? -this.rot * Math.PI / 2 : 0;
+    const ok = this._canPlace(this.tool, h.x, h.y, true) && game.credits >= this.costOf(this.tool);
     const c = ok ? 0x40ff80 : 0xff4040;
     this.ghostMat.color.setHex(c);
     this.ghostArrowMat.color.setHex(c);
@@ -542,9 +574,10 @@ export class Factory {
   onPointerMove(ev) {
     const t = this._tileAt(ev);
     if (this.pan && (ev.buttons & 5)) {
-      const k = this.dist / innerHeight * 1.6;
-      this.cx = this.pan.cx - (ev.clientX - this.pan.x) * k;
-      this.cz = this.pan.cz - (ev.clientY - this.pan.y) * k * 1.4;
+      const k = this.dist / this.rect.h * 1.6, A = this._axes();
+      const dx = (ev.clientX - this.pan.x) * k, dy = (ev.clientY - this.pan.y) * k * 1.4;
+      this.cx = this.pan.cx - A.rx * dx + A.fx * dy;
+      this.cz = this.pan.cz - A.rz * dx + A.fz * dy;
     }
     if (!t) return;
     const changed = !this.hover || this.hover.x !== t.x || this.hover.y !== t.y;
@@ -559,12 +592,15 @@ export class Factory {
   }
 
   onPointerUp() { this.placing = false; this.deleting = false; this.pan = null; }
+  onPointerLeave() { this.hover = null; this.ghost.visible = false; }
   onWheel(ev) { this.dist = Math.max(7, Math.min(48, this.dist * (ev.deltaY > 0 ? 1.1 : 0.9))); }
 
   onKey(code) {
     if (code === 'Digit1') this.setTool('belt');
     if (code === 'Digit2') this.setTool('miner');
     if (code === 'Digit3') this.setTool('refinery');
+    if (code === 'Digit4') this.setTool('teleporter');
+    if (code === 'KeyT') this.rotateView();
     if (code === 'KeyQ' || code === 'Escape') { this.tool = null; this.selected = null; this._updateGhost(); }
     if (code === 'KeyR') {
       const hb = this.hover && this.at(this.hover.x, this.hover.y);
@@ -576,21 +612,18 @@ export class Factory {
   }
 
   // ----- UI panel -----
-  getPanel() {
-    const b = this.selected;
-    if (!b) return null;
+  _info(b) {
+    const def = BUILD[b.type];
     if (b.type === 'teleporter') {
       return {
         title: 'Teleporter',
         lines: [
           ['Crystals sent', `${b.received}`],
-          ...RES_KEYS.map(k => [STAT_INFO[RESOURCES[k].stat].name, `${rate(k).toFixed(1)} /min`]),
+          ...RES_KEYS.map(k => [`Total ${STAT_INFO[RESOURCES[k].stat].name}`, `${rate(k).toFixed(1)} /min`]),
         ],
-        note: 'Every crystal is beamed to your towers. A steady flow (crystals/min) sets each stat\'s tier.',
-        buttons: [{ label: 'Close', action: 'close' }],
+        note: 'Every crystal is beamed to your towers. The combined steady flow of all teleporters (crystals/min) sets each stat\'s tier.',
       };
     }
-    const def = BUILD[b.type];
     const lines = [];
     const mult = MK_MULT[b.mk - 1];
     if (b.type === 'belt') {
@@ -603,13 +636,57 @@ export class Factory {
         lines.push(['Input', b.inKind >= 0 ? `${b.inCount}× ${itemName(b.inKind)}` : 'empty']);
       }
     }
+    if (def.upg && b.mk < 3) lines.push(['Next upgrade', `${def.upg[b.mk - 1]} ◈`]);
+    return { title: `${def.name}${def.upg ? ' Mk' + b.mk : ''}`, lines, note: def.desc };
+  }
+
+  getHoverInfo() {
+    if (!this.hover || this.placing || this.pan || this.deleting) return null;
+    const b = this.at(this.hover.x, this.hover.y);
+    if (b && b !== this.selected) return this._info(b);
+    if (!b && this.tool) {
+      const def = BUILD[this.tool];
+      return { title: def.name, lines: [['Cost', `${this.costOf(this.tool)} ◈`]], note: def.desc };
+    }
+    return null;
+  }
+
+  getPanel() {
+    const b = this.selected;
+    if (!b) return null;
+    const info = this._info(b);
+    const def = BUILD[b.type];
     const buttons = [];
     if (def.upg && b.mk < 3) {
       const locked = b.mk === 2 && !game.research.has('mk3');
       buttons.push({ label: locked ? `Mk3 needs research` : `Upgrade → Mk${b.mk + 1} (${def.upg[b.mk - 1]} ◈)`, action: 'upgrade', disabled: locked || game.credits < def.upg[b.mk - 1] });
     }
-    buttons.push({ label: 'Rotate (R)', action: 'rotate' }, { label: `Remove (+${Math.floor(b.spent * 0.5)} ◈)`, action: 'remove' });
-    return { title: def.name, lines, note: def.desc, buttons };
+    if (b.type !== 'teleporter') buttons.push({ label: 'Rotate (R)', action: 'rotate' });
+    if (!b.fixed) buttons.push({ label: `Remove (+${Math.floor(b.spent * 0.5)} ◈)`, action: 'remove' });
+    buttons.push({ label: 'Close', action: 'close' });
+    return { ...info, buttons };
+  }
+
+  // ----- save / load -----
+  serialize() {
+    return {
+      cam: [this.cx, this.cz, this.dist, this.yaw],
+      buildings: this.buildings.map(b => [b.type, b.x, b.y, b.dir, b.mk, b.spent, b.fixed ? 1 : 0]),
+    };
+  }
+  load(d) {
+    for (const b of this.buildings) this.scene.remove(b.mesh);
+    this.buildings = [];
+    this.grid.fill(null);
+    for (const [type, x, y, dir, mk, spent, fixed] of d.buildings) {
+      const b = this._place(type, x, y, dir);
+      b.spent = spent;
+      b.mk = mk;
+      if (fixed) { b.fixed = true; this.teleporter = b; }
+      if (mk > 1 && b.parts.band) { b.parts.band.material = mkMats[mk - 1]; b.mesh.scale.setScalar(1 + (mk - 1) * 0.04); }
+    }
+    [this.cx, this.cz, this.dist, this.yaw] = d.cam;
+    this.yawCur = this.yaw;
   }
 
   panelAction(a) {

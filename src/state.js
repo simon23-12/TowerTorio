@@ -16,7 +16,7 @@ export const RES_KEYS = Object.keys(RESOURCES);
 export const STAT_INFO = {
   attack:    { name: 'Attack',    icon: '⚔', desc: 'Damage per shot' },
   hp:        { name: 'HP',        icon: '✚', desc: 'Tower health and regeneration' },
-  dexterity: { name: 'Dexterity', icon: '➶', desc: 'Range, crit chance, projectile speed' },
+  dexterity: { name: 'Dexterity', icon: '➶', desc: 'Reach beyond its sector, crit chance, projectile speed' },
   energy:    { name: 'Energy',    icon: '⚡', desc: 'Fire rate, extra weapons, special attacks' },
 };
 
@@ -111,7 +111,7 @@ export function towerStats(t = game.tier) {
     damage: 4 * Math.pow(1.6, a),
     maxHP: 100 + 120 * h + 25 * h * h,
     regen: 0.5 + 2.5 * h,
-    range: 11 + 1.5 * d,
+    reach: 1 + 1.5 * d,
     crit: Math.min(0.6, 0.05 + 0.06 * d),
     critMul: 2 + 0.15 * d,
     projSpeed: 20 + 5 * d,

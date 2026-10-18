@@ -39,6 +39,7 @@
         <button id="btn-codex" class="btn small" title="Enemy codex">Codex <kbd>K</kbd></button>
         <button id="btn-speed" class="btn small" title="Game speed (F)">×1</button>
         <button id="btn-pause" class="btn small" title="Pause (P / Esc)">❚❚</button>
+        <button id="btn-split" class="btn small" title="Split view: corridor and factory side by side (V)">◫ Split <kbd>V</kbd></button>
         <button id="btn-mute" class="btn small" title="Mute (M)">♪</button>
       </div>
     </div>
@@ -62,14 +63,16 @@
     <div id="toasts"></div>
     <div id="alert" class="hidden"></div>
 
+    <div id="sectors"></div>
+    <div id="tooltip" class="hidden"></div>
     <div id="defense-bar" class="bottombar">
-      <div id="sectors"></div>
+      <div id="towercost"></div>
       <div id="specials"></div>
-      <div class="hint">Click a glowing pad to build · drag or <kbd>A</kbd><kbd>D</kbd> to pan · wheel to zoom</div>
+      <div class="hint">Click inside a lit sector to build · drag or <kbd>W</kbd><kbd>S</kbd> to pan · wheel to zoom</div>
     </div>
     <div id="factory-bar" class="bottombar hidden">
       <div id="hotbar"></div>
-      <div class="hint"><kbd>R</kbd> rotate · right-click remove · <kbd>Q</kbd> deselect · <kbd>WASD</kbd> / drag pan · wheel zoom</div>
+      <div class="hint"><kbd>R</kbd> rotate building · <kbd>T</kbd> rotate view · right-click remove · <kbd>Q</kbd> deselect · <kbd>WASD</kbd> / drag pan</div>
     </div>
   </div>
 
@@ -83,6 +86,7 @@
     <div class="logo">TOWER<span>TORIO</span></div>
     <div class="tagline">Tower defense × factory automation</div>
     <div class="menu-buttons">
+      <button class="btn big hidden" id="btn-continue">Continue</button>
       <button class="btn big" id="btn-new">New Game</button>
       <button class="btn big ghost" id="btn-howto">How to Play</button>
       <button class="btn big ghost" id="btn-music">Music: On</button>
@@ -97,19 +101,19 @@
         <div>
           <h4>⚔ The Corridor</h4>
           <p>Enemies pour out of a long, pitch-black corridor toward your <b>Core</b>. Only Sector 1 is visible — and only through fog.</p>
-          <p>Click a glowing <b>pad</b> to build a Watchtower. Towers burn away the fog, reveal the next sector and <b>identify</b> the enemies they see.</p>
+          <p>Click inside a sector to build its one <b>Watchtower</b> — where in the sector doesn't matter, it covers the whole sector. Building a tower <b>clears</b> that sector: the next one lights up, the fog moves one sector further, and everything beyond stays black. Towers <b>identify</b> the enemies they see.</p>
           <p>Your starting tower is pathetic. It <b>will</b> fall within the first few waves unless you power it up.</p>
           <p>Kills earn <b>◈ Credits</b>.</p>
         </div>
         <div>
           <h4>⚙ The Factory</h4>
-          <p>A separate map. Press <kbd>Tab</kbd> to switch. Place <b>Quarry Drills</b> on ore, belt the ore into <b>Refineries</b>, then belt the crystals into the <b>Teleporter</b>.</p>
+          <p>A separate map. Press <kbd>Tab</kbd> to switch. Place <b>Quarry Drills</b> on ore, belt the ore into <b>Refineries</b>, then belt the crystals into a <b>Teleporter</b>. You can buy more teleporters. <kbd>V</kbd> shows both maps side by side.</p>
           <p>Each resource powers one stat: <span class="c-a">Alcamanium → Attack</span>, <span class="c-h">Vitrium → HP</span>, <span class="c-d">Quicksilite → Dexterity</span>, <span class="c-e">Voltarite → Energy</span>.</p>
           <p>Tiers depend on the <b>steady flow</b> (crystals/min). Ore never runs out — but if supply drops, so does your tower.</p>
           <p>Spend credits on new machines, upgrades and research.</p>
         </div>
       </div>
-      <p class="keys"><kbd>Tab</kbd> switch map · <kbd>P</kbd> pause · <kbd>F</kbd> speed · <kbd>M</kbd> mute · <kbd>K</kbd> codex · <kbd>T</kbd> research · <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> tools / specials</p>
+      <p class="keys"><kbd>Tab</kbd> switch map · <kbd>P</kbd> pause · <kbd>F</kbd> speed · <kbd>M</kbd> mute · <kbd>K</kbd> codex · <kbd>U</kbd> research · <kbd>T</kbd> rotate factory view · <kbd>V</kbd> split view · <kbd>1</kbd>–<kbd>4</kbd> tools / specials</p>
       <button class="btn" data-close>Got it</button>
     </div>
   </div>
