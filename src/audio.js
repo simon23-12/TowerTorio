@@ -1,24 +1,35 @@
-// Music (menu track + optional in-game track) and tiny synthesized sound effects.
-import { on } from './state.js';
+// Music (menu track + shuffled in-game playlist) and tiny synthesized sound effects.
+import { on, emit } from './state.js';
 
-// In-game music: drop files into assets/ and list them here (Opus first, MP3 fallback),
-// e.g. ['assets/game.ogg', 'assets/game.mp3']. Empty = silence during gameplay.
-export const GAME_MUSIC = [];
+// In-game playlist (OpenGameArt, see CREDITS.md). Each track ships as Opus with an MP3 fallback.
+export const GAME_MUSIC = [
+  { file: 'track01', title: 'Crystal Cave', artist: 'cynicmusic', license: 'CC0' },
+  { file: 'track02', title: 'Battle Theme A', artist: 'cynicmusic', license: 'CC0' },
+  { file: 'track03', title: 'Cyberpunk Moonlight Sonata', artist: 'Joth', license: 'CC0' },
+  { file: 'track04', title: 'Heroic Demise', artist: 'Matthew Pablo', license: 'CC-BY 3.0' },
+  { file: 'track05', title: 'Mystical Theme', artist: 'Alexandr Zhelanov', license: 'CC-BY 3.0' },
+  { file: 'track06', title: 'No More Magic', artist: 'HorrorPen', license: 'CC-BY 3.0' },
+  { file: 'track07', title: 'Cave Theme', artist: 'HaelDB', license: 'CC0' },
+  { file: 'track08', title: 'Orbital Colossus', artist: 'Matthew Pablo', license: 'CC-BY 3.0' },
+  { file: 'track09', title: 'Rise of Spirit', artist: 'Alexandr Zhelanov', license: 'CC-BY 3.0' },
+  { file: 'track10', title: 'Epic Boss Battle', artist: 'Juhani Junkala', license: 'CC0' },
+];
 
-const opus = document.createElement('audio').canPlayType('audio/ogg; codecs="opus"');
-function track(srcs) {
-  const src = srcs.find(s => opus || !s.endsWith('.ogg'));
-  if (!src) return null;
-  const a = new Audio(src);
-  a.loop = true;
-  a.preload = 'auto';
-  a.volume = 0;
-  return { el: a, target: 0 };
-}
+const ext = document.createElement('audio').canPlayType('audio/ogg; codecs="opus"') ? 'ogg' : 'mp3';
 
 class AudioManager {
   constructor() {
-    this.tracks = { menu: track(['assets/menu.ogg', 'assets/menu.mp3']), game: track(GAME_MUSIC) };
+    const menu = new Audio(`assets/menu.${ext}`);
+    menu.loop = true;
+    menu.preload = 'auto';
+    menu.volume = 0;
+    const game = new Audio();
+    game.preload = 'none';
+    game.volume = 0;
+    game.addEventListener('ended', () => this.nextSong());
+    this.tracks = { menu: { el: menu, target: 0 }, game: { el: game, target: 0 } };
+    this.playlist = [];
+    this.song = null;
     this.current = null;
     this.muted = false;
     this.ctx = null;
@@ -42,26 +53,43 @@ class AudioManager {
     if (this.ctx.state === 'suspended') this.ctx.resume();
   }
 
+  // shuffled playlist, never repeating the song that just ended
+  nextSong() {
+    if (!this.playlist.length) {
+      this.playlist = GAME_MUSIC.slice().sort(() => Math.random() - 0.5);
+      if (this.playlist[0] === this.song && this.playlist.length > 1) this.playlist.push(this.playlist.shift());
+    }
+    this.song = this.playlist.shift();
+    const el = this.tracks.game.el;
+    el.src = `assets/music/${this.song.file}.${ext}`;
+    if (this.current === 'game') {
+      el.play().catch(() => {});
+      emit('song', this.song);
+    }
+  }
+
   // cross-fade to 'menu', 'game' or null
   playTrack(name, volume = 0.6) {
     this.current = name;
+    if (name === 'game' && !this.song) this.nextSong();
     for (const [k, t] of Object.entries(this.tracks)) {
-      if (!t) continue;
       t.target = k === name ? volume : 0;
-      if (k === name && t.el.paused) t.el.play().catch(() => {});
+      if (k === name && t.el.paused) {
+        t.el.play().catch(() => {});
+        if (k === 'game') emit('song', this.song);
+      }
     }
   }
 
   toggleMute() {
     this.muted = !this.muted;
-    for (const t of Object.values(this.tracks)) if (t) t.el.muted = this.muted;
+    for (const t of Object.values(this.tracks)) t.el.muted = this.muted;
     if (this.master) this.master.gain.value = this.muted ? 0 : 0.32;
     return this.muted;
   }
 
   update(dt) {
     for (const t of Object.values(this.tracks)) {
-      if (!t) continue;
       const v = t.el.volume;
       if (Math.abs(v - t.target) > 0.005) {
         try { t.el.volume = Math.max(0, Math.min(1, v + Math.sign(t.target - v) * Math.min(Math.abs(t.target - v), dt * 0.6))); } catch (e) { /* iOS: volume is read-only */ }

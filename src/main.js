@@ -7,7 +7,7 @@ import { game, on, resetGame, updateEconomy } from './state.js';
 import { Defense } from './defense.js';
 import { Factory } from './factory.js';
 import { UI } from './ui.js';
-import { audio } from './audio.js';
+import { audio, GAME_MUSIC } from './audio.js';
 
 const SAVE_KEY = 'towertorio-save-v1';
 const SPLIT_DEFENSE = 0.42; // share of the screen the corridor gets in split view
@@ -154,8 +154,19 @@ function toMenu() {
   audio.playTrack('menu', 0.6);
 }
 
+on('victory', () => {
+  game.over = true;
+  clearSave();
+  $('go-title').textContent = 'Corridor Secured!';
+  $('go-title').classList.remove('bad');
+  $('go-stats').innerHTML = `All 8 sectors cleared in <b>${game.wave}</b> waves<br>Enemies slain <b>${game.stats.kills}</b><br>Crystals teleported <b>${game.stats.delivered}</b><br>Credits earned <b>${Math.round(game.stats.earned)}</b>`;
+  $('gameover').classList.remove('hidden');
+  audio.sfx('tier');
+});
 on('gameover', () => {
   clearSave();
+  $('go-title').textContent = 'The Core Has Fallen';
+  $('go-title').classList.add('bad');
   $('go-stats').innerHTML = `Survived to wave <b>${game.wave}</b><br>Enemies slain <b>${game.stats.kills}</b><br>Crystals teleported <b>${game.stats.delivered}</b><br>Credits earned <b>${game.stats.earned}</b>`;
   $('gameover').classList.remove('hidden');
   audio.sfx('destroyed');
@@ -180,6 +191,19 @@ $('btn-new').onclick = () => {
 $('btn-howto').onclick = () => ui.openModal('howto');
 $('btn-howto2').onclick = () => { $('pausemenu').classList.add('hidden'); ui.openModal('howto'); };
 $('btn-music').onclick = toggleMute;
+$('credits-list').innerHTML = GAME_MUSIC.map(t => `<div class="line"><span>${t.title}</span><span>${t.artist}</span><span>${t.license}</span></div>`).join('');
+$('btn-credits').onclick = () => ui.openModal('credits-modal');
+function toggleFullscreen() {
+  const d = document;
+  if (d.fullscreenElement || d.webkitFullscreenElement) (d.exitFullscreen || d.webkitExitFullscreen).call(d);
+  else { const el = d.documentElement; (el.requestFullscreen || el.webkitRequestFullscreen)?.call(el)?.catch?.(() => {}); }
+}
+const syncFullscreenLabel = () => document.querySelectorAll('.btn-fullscreen').forEach(b => {
+  b.textContent = document.fullscreenElement || document.webkitFullscreenElement ? '⛶ Exit Fullscreen' : '⛶ Fullscreen';
+});
+document.querySelectorAll('.btn-fullscreen').forEach(b => { b.onclick = toggleFullscreen; });
+document.addEventListener('fullscreenchange', syncFullscreenLabel);
+document.addEventListener('webkitfullscreenchange', syncFullscreenLabel);
 $('btn-resume').onclick = () => setPause(false);
 $('btn-quit').onclick = toMenu;
 $('btn-quit2').onclick = toMenu;
@@ -224,7 +248,7 @@ addEventListener('keydown', e => {
   if (mode !== 'playing') return;
   if (e.code === 'Tab') { e.preventDefault(); if (!game.paused) setView(game.view === 'defense' ? 'factory' : 'defense'); return; }
   if (e.code === 'Escape' || e.code === 'KeyP') {
-    const anyModal = ['howto', 'codex', 'research'].some(id => !$(id).classList.contains('hidden'));
+    const anyModal = ['howto', 'codex', 'research', 'credits-modal'].some(id => !$(id).classList.contains('hidden'));
     if (anyModal) { ui.closeModals(); return; }
     if (e.code === 'Escape' && game.view === 'factory' && (factory.tool || factory.selected)) { factory.onKey('Escape'); return; }
     if (e.code === 'Escape' && game.view === 'defense' && defense.selected) { defense.onKey('Escape'); return; }

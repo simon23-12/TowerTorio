@@ -68,7 +68,7 @@
     <div id="defense-bar" class="bottombar">
       <div id="towercost"></div>
       <div id="specials"></div>
-      <div class="hint">Click inside a lit sector to build · drag or <kbd>W</kbd><kbd>S</kbd> to pan · wheel to zoom</div>
+      <div class="hint">Click inside the lit front sector to build · drag / <kbd>WASD</kbd> pan · <kbd>T</kbd> rotate · wheel zoom</div>
     </div>
     <div id="factory-bar" class="bottombar hidden">
       <div id="hotbar"></div>
@@ -90,6 +90,8 @@
       <button class="btn big" id="btn-new">New Game</button>
       <button class="btn big ghost" id="btn-howto">How to Play</button>
       <button class="btn big ghost" id="btn-music">Music: On</button>
+      <button class="btn big ghost btn-fullscreen">⛶ Fullscreen</button>
+      <button class="btn big ghost" id="btn-credits">Credits</button>
     </div>
     <div class="foot">First draft · built with three.js · everything procedural</div>
   </div>
@@ -101,7 +103,7 @@
         <div>
           <h4>⚔ The Corridor</h4>
           <p>Enemies pour out of a long, pitch-black corridor toward your <b>Core</b>. Only Sector 1 is visible — and only through fog.</p>
-          <p>Click inside a sector to build its one <b>Watchtower</b> — where in the sector doesn't matter, it covers the whole sector. Building a tower <b>clears</b> that sector: the next one lights up, the fog moves one sector further, and everything beyond stays black. Towers <b>identify</b> the enemies they see.</p>
+          <p>Click inside a sector to build its <b>Watchtower</b> — where in the sector doesn't matter, it covers the whole sector. Only the <b>front</b> tower is active. Beat its sector's <b>3 waves</b> to clear it: enemies stop, the next sector lights up and the fog moves on. Build in the next sector to advance — the old tower shuts down for good. Towers <b>identify</b> the enemies they see.</p>
           <p>Your starting tower is pathetic. It <b>will</b> fall within the first few waves unless you power it up.</p>
           <p>Kills earn <b>◈ Credits</b>.</p>
         </div>
@@ -113,7 +115,7 @@
           <p>Spend credits on new machines, upgrades and research.</p>
         </div>
       </div>
-      <p class="keys"><kbd>Tab</kbd> switch map · <kbd>P</kbd> pause · <kbd>F</kbd> speed · <kbd>M</kbd> mute · <kbd>K</kbd> codex · <kbd>U</kbd> research · <kbd>T</kbd> rotate factory view · <kbd>V</kbd> split view · <kbd>1</kbd>–<kbd>4</kbd> tools / specials</p>
+      <p class="keys"><kbd>Tab</kbd> switch map · <kbd>P</kbd> pause · <kbd>F</kbd> speed · <kbd>M</kbd> mute · <kbd>K</kbd> codex · <kbd>U</kbd> research · <kbd>T</kbd> rotate view · <kbd>V</kbd> split view · <kbd>1</kbd>–<kbd>4</kbd> tools / specials</p>
       <button class="btn" data-close>Got it</button>
     </div>
   </div>
@@ -136,18 +138,29 @@
     </div>
   </div>
 
+  <div id="credits-modal" class="overlay modal hidden">
+    <div class="modal-box">
+      <h2>Credits</h2>
+      <p class="sub">In-game music from <a href="https://opengameart.org" target="_blank" rel="noopener">OpenGameArt.org</a>, re-encoded for the web.</p>
+      <div id="credits-list"></div>
+      <p class="sub">CC-BY 3.0 tracks are used under <a href="https://creativecommons.org/licenses/by/3.0/" target="_blank" rel="noopener">Creative Commons Attribution 3.0</a>. Main menu theme supplied by the project owner. Everything else is procedural three.js.</p>
+      <button class="btn" data-close>Close</button>
+    </div>
+  </div>
+
   <div id="pausemenu" class="overlay modal hidden">
     <div class="modal-box small">
       <h2>Paused</h2>
       <button class="btn big" id="btn-resume">Resume</button>
       <button class="btn big ghost" id="btn-howto2">How to Play</button>
+      <button class="btn big ghost btn-fullscreen">⛶ Fullscreen</button>
       <button class="btn big ghost" id="btn-quit">Quit to Menu</button>
     </div>
   </div>
 
   <div id="gameover" class="overlay modal hidden">
     <div class="modal-box small">
-      <h2 class="bad">The Core Has Fallen</h2>
+      <h2 class="bad" id="go-title">The Core Has Fallen</h2>
       <div id="go-stats"></div>
       <button class="btn big" id="btn-retry">Try Again</button>
       <button class="btn big ghost" id="btn-quit2">Main Menu</button>

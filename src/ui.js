@@ -24,6 +24,7 @@ export class UI {
     this.slow = 0;
     on('toast', t => this.toast(t.text, t.kind));
     on('discover', () => this.renderCodex());
+    on('song', song => this.toast(`♪ Now playing: <b>${song.title}</b> — ${song.artist}`, 'info'));
 
     $('tab-defense').onclick = () => handlers.setView('defense');
     $('tab-factory').onclick = () => handlers.setView('factory');
@@ -97,7 +98,7 @@ export class UI {
     this.h.modalOpen(true);
   }
   closeModals(notify = true) {
-    for (const id of ['howto', 'codex', 'research', 'pausemenu']) $(id).classList.add('hidden');
+    for (const id of ['howto', 'codex', 'research', 'pausemenu', 'credits-modal']) $(id).classList.add('hidden');
     if (notify) this.h.modalOpen(false);
   }
 
@@ -131,13 +132,13 @@ export class UI {
   }
 
   update(defense, factory, { split, hoverView, mouse }) {
-    $('credits').textContent = Math.floor(game.credits);
+    $('credits').textContent = game.credits % 1 ? game.credits.toFixed(1) : game.credits;
     $('core').textContent = `${game.coreHP}/${game.coreMax}`;
     $('core-chip').classList.toggle('low', game.coreHP <= 6);
     const inc = defense.incomingInfo();
     $('wave').textContent = game.wave;
-    $('wavetimer').textContent = inc.active ? '· spawning' : `· next in ${Math.max(0, Math.ceil(inc.timer))}s`;
-    $('btn-call').disabled = inc.active;
+    $('wavetimer').textContent = inc.active ? '· spawning' : inc.waiting ? '· halted' : !inc.moreWaves ? '· last wave' : `· next in ${Math.max(0, Math.ceil(inc.timer))}s`;
+    $('btn-call').disabled = inc.active || inc.waiting || !inc.moreWaves;
 
     // stats
     for (const k of RES_KEYS) {
@@ -158,9 +159,12 @@ export class UI {
     }
 
     // incoming
-    let html;
-    if (inc.active || inc.alive) html = `Wave <b>${game.wave}</b>: <b>${inc.alive + inc.queued}</b> enemies remaining`;
-    else html = '';
+    let html = '';
+    if (inc.waiting) html = defense.cleared === 0 && defense.front < 0
+      ? 'Quiet… enemies arrive once your first tower stands.'
+      : `<b>Sector ${defense.cleared} cleared.</b> No enemies until you build a tower in <b>Sector ${defense.cleared + 1}</b>.`;
+    else html = `Sector <b>${inc.sector + 1}</b> · wave <b>${Math.min(inc.sectorWave, inc.perSector)}/${inc.perSector}</b>`;
+    if (inc.active || inc.alive) html += `<br>Wave <b>${game.wave}</b>: <b>${inc.alive + inc.queued}</b> enemies remaining`;
     if (inc.comp) {
       html += `${html ? '<br>' : ''}Wave <b>${inc.wave}</b>: ` + Object.entries(inc.comp).map(([t, n]) =>
         game.discovered.has(t) ? `${n}× <span style="color:${ENEMY_TYPES[t].color}">${ENEMY_TYPES[t].name}</span>` : `${n}× <span class="unknown">???</span>`).join(', ');
@@ -191,19 +195,18 @@ export class UI {
 
     // defense bottom bar
     if (game.view === 'defense' || split) {
-      const cost = defense.towerCost();
-      const next = defense.towers.findIndex((t, i) => defense.canBuildSector(i));
-      $('towercost').innerHTML = next >= 0
-        ? `Watchtower cost: <b class="${game.credits >= cost ? '' : 'bad'}">${cost} ◈</b> · buildable in Sector ${next + 1}${defense.cleared > next + 1 ? '' : ''}`
-        : `All open sectors have towers · clear further by building in the next lit sector`;
+      const next = defense.cleared, cost = defense.towerCost(next);
+      $('towercost').innerHTML = defense.canBuildSector(next)
+        ? `Watchtower cost: <b class="${game.credits >= cost ? '' : 'bad'}">${cost} ◈</b> · build in Sector ${next + 1}`
+        : `Hold Sector ${next + 1}: beat ${inc.perSector - Math.min(inc.sectorWave, inc.perSector) + (inc.active || inc.alive ? 1 : 0)} more wave(s) · next tower <b>${defense.towerCost(next + 1)} ◈</b>`;
       const info = defense.sectorInfo();
       const viewSector = Math.floor((defense.camX + 6) / 22);
-      document.querySelectorAll('.sector').forEach((el, i) => {
-        const s = info[i];
+      document.querySelectorAll('.sector').forEach(el => {
+        const i = +el.dataset.sector, s = info[i];
         el.classList.toggle('fog', s.state >= 1);
         el.classList.toggle('view', i === viewSector);
         el.classList.toggle('clear', s.state === 2);
-        const txt = s.state >= 1 ? `S${i + 1}${s.tower ? ' <span class="tw">♜</span>' : s.ruin ? ' <span class="danger">✕</span>' : ''}${s.known ? ` <span class="danger">☠${s.known}</span>` : ''}` : '▓';
+        const txt = s.state >= 1 ? `S${i + 1}${s.tower ? ' <span class="tw">♜</span>' : s.offline ? ' <span class="off">♜</span>' : s.ruin ? ' <span class="danger">✕</span>' : ''}${s.known ? ` <span class="danger">☠${s.known}</span>` : ''}` : '▓';
         if (el._t !== txt) { el._t = txt; el.innerHTML = txt; }
       });
       const S = defense.stats();

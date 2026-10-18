@@ -9,6 +9,7 @@ import { stoneTexture, textTexture } from './textures.js';
 const SL = SECTOR_LEN, L = CORRIDOR_LEN, HW = CORRIDOR_W / 2;
 const NV = 20;          // max vision sources in the fog shader
 const FOG_Y = 4.4;      // height of the fog plane
+export const WAVES_PER_SECTOR = 3;
 
 export const ENEMY_TYPES = {
   crawler:  { name: 'Crawler',  hp: 14,   speed: 2.4, dmg: 3,  range: 1.4, atkRate: 1.0, reward: 4,   leak: 1,  color: '#ff5a4a', desc: 'Swarming bug. Weak alone, dangerous in numbers. Chews on any tower it passes.' },
@@ -254,7 +255,10 @@ export class Defense {
     this.wave = 0; this.waveTimer = attract ? 1 : 40; this.waveActive = false;
     this.spawnQueue = []; this.spawnTimer = 0; this.bonusPending = 0;
     this.energy = 0; this.slowT = 0; this.overT = 0; this.hail = null;
-    this.cleared = 0;                                 // sectors 1..cleared have had a tower
+    this.cleared = 0;                                 // sectors 1..cleared have beaten all their waves
+    this.front = -1;                                  // sector of the one active (front) tower
+    this.sectorWaves = 0;                             // waves started in the front sector
+    this.yaw = 0; this.yawCur = 0;
     this.towers = new Array(SECTORS).fill(null);      // one tower per sector
     this.rubble = new Array(SECTORS).fill(null);
     this.sectorState = new Array(SECTORS).fill(0);    // 0 dark, 1 fog, 2 clear
@@ -274,6 +278,7 @@ export class Defense {
     });
     if (attract) {
       for (let i = 0; i < 5; i++) this._placeTower(i, i * SL + SL * (0.3 + Math.random() * 0.4), (Math.random() - 0.5) * 8);
+      this.cleared = 4;
     }
     this.refreshSectors();
     this.updateCamera(0);
@@ -420,18 +425,20 @@ export class Defense {
   }
 
   // ----- sectors -----
-  // Sectors 1..k are cleared. After clearing at least one, the next sector is lit too,
-  // the one after that is foggy, and everything beyond is pitch black.
+  // Sectors 1..k have beaten their waves. The next sector is lit once you're allowed to
+  // build there (or a tower already stands in it), the one after is foggy, the rest is black.
   refreshSectors() {
     const k = this.cleared;
     for (let i = 0; i < SECTORS; i++) {
       let st = 0;
       if (i < k) st = 2;
-      else if (i === k) st = k >= 1 ? 2 : 1;
+      else if (i === k) st = k >= 1 || this.front === k ? 2 : 1;
       else if (i === k + 1) st = 1;
       this.sectorState[i] = st;
     }
   }
+  // waves only come while the front tower's sector still has waves left to beat
+  get fighting() { return this.attract || (this.front >= 0 && this.front === this.cleared && this.cleared < SECTORS); }
   stateAtX(x) {
     const i = Math.floor(x / SL);
     if (i < 0) return 2;
@@ -439,22 +446,22 @@ export class Defense {
     return this.sectorState[i];
   }
   sectorOf(x) { return Math.max(0, Math.min(SECTORS - 1, Math.floor(x / SL))); }
-  canBuildSector(i) { return i >= 0 && i < SECTORS && i <= this.cleared && !this.towers[i]?.alive; }
+  canBuildSector(i) { return i >= 0 && i < SECTORS && i === this.cleared && !this.towers[i]?.alive; }
 
   // ----- towers -----
   aliveTowers() { return this.towers.filter(t => t?.alive).length; }
-  towerCost() { return 20 + 15 * this.aliveTowers(); }
+  towerCost(s = this.cleared) { return 20 + 20 * s; }
 
   buildAt(x, z) {
     const s = Math.floor(x / SL);
     if (s < 0 || s >= SECTORS) return;
     if (this.towers[s]?.alive) return;
     if (!this.canBuildSector(s)) {
-      toast(s > 0 ? `Clear Sector ${s} first — build a tower there` : 'Cannot build here', 'bad');
+      toast(s > this.cleared ? `Beat the waves in Sector ${this.cleared + 1} first` : 'Only the front sector can hold an active tower', 'bad');
       emit('sfx', 'error');
       return;
     }
-    if (!spend(this.towerCost())) return;
+    if (!spend(this.towerCost(s))) return;
     const p = this._clampInSector(s, x, z);
     this._placeTower(s, p.x, p.z);
     emit('sfx', 'build');
@@ -472,14 +479,44 @@ export class Defense {
     m.group.position.set(x, 0, z);
     this.scene.add(m.group);
     const S = this.stats();
-    this.towers[s] = { sector: s, x, z, mesh: m, hp: hp ?? S.maxHP, maxHP: S.maxHP, cd: Math.random() * 0.5, alive: true, flash: 0 };
+    this.towers[s] = { sector: s, x, z, mesh: m, hp: hp ?? S.maxHP, maxHP: S.maxHP, cd: Math.random() * 0.5, alive: true, active: true, flash: 0 };
     this.lights[s].position.set(x, 7.5, z);
     this.lights[s].intensity = 70;
-    if (s === this.cleared) {
-      this.cleared++;
-      this.refreshSectors();
-      if (!this.attract && s + 1 < SECTORS) toast(`Sector ${s + 1} cleared — the fog lifts from Sector ${s + 2}`, 'good');
+    if (this.attract) return;
+    if (s !== this.front) {
+      // the old front tower powers down and stays on the field as a dark husk
+      const old = this.towers[this.front];
+      if (old?.alive) this._shutDown(old);
+      this.front = s;
+      this.sectorWaves = 0;
+      this.waveTimer = 20;
+      if (s > 0 && !this.loading) toast(`Sector ${s + 1} tower online — the tower in Sector ${s} shuts down. Waves resume in 20s.`, 'warn');
     }
+    this.refreshSectors();
+  }
+
+  _shutDown(t) {
+    t.active = false;
+    this.lights[t.sector].intensity = 0;
+    const m = t.mesh;
+    m.crystalMat.color.setHex(0x1a1c22);
+    m.rings.forEach(r => { r.visible = false; });
+    m.bar.visible = false;
+    if (this.selected === t) this.selected = null;
+  }
+
+  _sectorCleared() {
+    const s = this.cleared;
+    this.cleared++;
+    this.refreshSectors();
+    if (this.cleared >= SECTORS) { toast('The corridor is secured!', 'good'); emit('victory'); return; }
+    // bounty, topped up so the next tower is always affordable (no income while waves are halted)
+    let bounty = 25 + 10 * s;
+    const short = this.towerCost(this.cleared) - (game.credits + bounty);
+    if (short > 0) bounty += short;
+    earn(bounty);
+    toast(`Sector ${s + 1} cleared! +${bounty} ◈. No more enemies until you build a tower in Sector ${s + 2}.`, 'good');
+    emit('sfx', 'tier');
   }
 
   _damageTower(t, dmg) {
@@ -503,6 +540,7 @@ export class Defense {
     this._burst(t.x, 3, t.z, 0xffa040, 20, 8);
     this.shake = 0.6;
     if (this.attract) { setTimeout(() => { if (!this.towers[s]?.alive) this._placeTower(s, t.x, t.z); }, 5000); return; }
+    this.refreshSectors();
     emit('sfx', 'destroyed');
     toast(`Tower in Sector ${s + 1} was destroyed! Strengthen it in the Factory.`, 'bad');
   }
@@ -544,7 +582,7 @@ export class Defense {
   }
 
   callWave() {
-    if (this.waveActive || this.attract) return;
+    if (this.waveActive || this.attract || !this.fighting || this.sectorWaves >= WAVES_PER_SECTOR) return;
     const bonus = Math.ceil(this.waveTimer / 2);
     if (bonus > 0) { earn(bonus); toast(`Called early: +${bonus} ◈`, 'good'); }
     this.waveTimer = 0;
@@ -553,7 +591,13 @@ export class Defense {
   incomingInfo() {
     const next = this.waveActive ? this.wave : this.wave + 1;
     const comp = this.waveActive ? null : this.composition(next);
-    return { wave: next, active: this.waveActive, timer: this.waveTimer, comp, alive: this.enemies.length, queued: this.spawnQueue.length };
+    const waiting = !this.fighting;
+    const moreWaves = this.sectorWaves < WAVES_PER_SECTOR;
+    return {
+      wave: next, active: this.waveActive, timer: this.waveTimer, comp: waiting || !moreWaves ? null : comp,
+      alive: this.enemies.length, queued: this.spawnQueue.length, waiting, moreWaves,
+      sector: this.front, sectorWave: this.sectorWaves, perSector: WAVES_PER_SECTOR,
+    };
   }
 
   _spawn(type) {
@@ -667,8 +711,10 @@ export class Defense {
     const S = this.stats();
 
     if (!this.waveActive) {
-      this.waveTimer -= dt;
-      if (this.waveTimer <= 0) this.startWave();
+      if (this.fighting && (this.attract || this.sectorWaves < WAVES_PER_SECTOR)) {
+        this.waveTimer -= dt;
+        if (this.waveTimer <= 0) { this.sectorWaves++; this.startWave(); }
+      } else if (this.fighting && !this.enemies.length) this._sectorCleared();
     } else {
       this.spawnTimer -= dt;
       if (this.spawnTimer <= 0 && this.spawnQueue.length) {
@@ -721,6 +767,9 @@ export class Defense {
 
   _updateEnemies(dt) {
     const slow = this.slowT > 0 ? 0.4 : 1;
+    // only so many melee attackers fit around a tower; the rest queue up
+    for (const t of this.towers) if (t) t.slots = 5;
+    for (const e of this.enemies) if (e.engaged) e.engaged.slots--;
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       const e = this.enemies[i], T = e.T;
       let spd = T.speed * slow;
@@ -729,12 +778,16 @@ export class Defense {
       // every tower-hunting enemy goes for the tower of the sector it is in
       const sec = Math.floor(e.x / SL);
       const tw = sec >= 0 && sec < SECTORS ? this.towers[sec] : null;
-      const target = !T.ignoresTowers && tw?.alive ? tw : null;
+      const target = !T.ignoresTowers && tw?.alive && tw.active ? tw : null;
       let vx = 0, vz = 0;
       if (target) {
         const dx = target.x - e.x, dz = target.z - e.z, td = Math.hypot(dx, dz);
-        if (td > T.range + 1.4) { vx = dx / td; vz = dz / td; }
+        const reach = T.range + 1.4;
+        const queued = !T.ranged && td <= reach + 2.5 && e.engaged !== target && target.slots <= 0;
+        if (queued) { /* wait for a free spot */ }
+        else if (td > reach) { vx = dx / td; vz = dz / td; e.engaged = null; }
         else {
+          if (!T.ranged && e.engaged !== target) { target.slots--; e.engaged = target; }
           e.body.rotation.y = Math.atan2(-dz, dx);
           if (e.atkCd <= 0) {
             e.atkCd = 1 / T.atkRate;
@@ -744,6 +797,7 @@ export class Defense {
           }
         }
       } else {
+        e.engaged = null;
         vx = -1; vz = (e.lane - e.z) * 0.4;
         const l = Math.hypot(vx, vz); vx /= l; vz /= l;
       }
@@ -789,7 +843,7 @@ export class Defense {
     const rate = this.overT > 0 ? 2.5 : 1;
     const crystalCol = ARROW_COLORS[Math.min(ARROW_COLORS.length - 1, S.attackTier)];
     for (const t of this.towers) {
-      if (!t?.alive) continue;
+      if (!t?.alive || !t.active) continue;
       if (S.maxHP > t.maxHP) t.hp += S.maxHP - t.maxHP;
       t.maxHP = S.maxHP;
       t.hp = Math.min(t.maxHP, t.hp + S.regen * dt);
@@ -896,17 +950,28 @@ export class Defense {
       this.camX = L * 0.2 + Math.sin(this.time * 0.06) * L * 0.16;
       this.zoom = 1.05;
     } else {
+      const A = this._axes(), k = this.keys;
       const pan = 40 * this.zoom * dt;
-      if (this.keys.has('KeyW') || this.keys.has('ArrowUp')) this.camX += pan;
-      if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) this.camX -= pan;
+      const f = (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0);
+      const r = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
+      this.camX += (A.fx * f + A.rx * r) * pan;
       this.camX = Math.max(-2, Math.min(L, this.camX));
     }
+    this.yawCur += (this.yaw - this.yawCur) * Math.min(1, dt * 8);
+    const A = this._axes();
     const d = 24 * this.zoom;
     this.shake = Math.max(0, this.shake - dt * 2);
     const sx = (Math.random() - 0.5) * this.shake, sy = (Math.random() - 0.5) * this.shake;
-    this.camera.position.set(this.camX - d * 0.72, d + sy, sx);
-    this.camera.lookAt(this.camX + 2, 0, sx);
+    this.camera.position.set(this.camX - A.fx * d * 0.72 + sx, d + sy, -A.fz * d * 0.72);
+    this.camera.lookAt(this.camX + A.fx * 2 + sx, 0, A.fz * 2);
   }
+
+  // screen-up (f) and screen-right (r) directions on the floor for the current rotation
+  _axes() {
+    const c = Math.cos(this.yawCur), s = Math.sin(this.yawCur);
+    return { fx: c, fz: -s, rx: s, rz: c };
+  }
+  rotateView() { this.yaw += Math.PI / 2; emit('sfx', 'click'); }
 
   _ndc(ev) {
     const r = this.rect;
@@ -929,13 +994,14 @@ export class Defense {
     return { x: p.x, z: p.z, sector };
   }
 
-  onPointerDown(ev) { this.drag = { y: ev.clientY, camX: this.camX, moved: false }; }
+  onPointerDown(ev) { this.drag = { x: ev.clientX, y: ev.clientY, camX: this.camX, moved: false }; }
   onPointerMove(ev) {
     if (this.drag && (ev.buttons & 1)) {
-      const dy = ev.clientY - this.drag.y;
-      if (Math.abs(dy) > 5) this.drag.moved = true;
-      const worldH = 2 * 24 * this.zoom * 1.23 * Math.tan(THREE.MathUtils.degToRad(24)) * 1.4;
-      this.camX = Math.max(-2, Math.min(L, this.drag.camX + dy * worldH / this.rect.h));
+      const dx = ev.clientX - this.drag.x, dy = ev.clientY - this.drag.y;
+      if (Math.hypot(dx, dy) > 5) this.drag.moved = true;
+      const k = 2 * 24 * this.zoom * 1.23 * Math.tan(THREE.MathUtils.degToRad(24)) * 1.4 / this.rect.h;
+      const A = this._axes();
+      this.camX = Math.max(-2, Math.min(L, this.drag.camX + (A.fx * dy - A.rx * dx) * k));
     }
     this.hover = this._pick(ev);
     this._updateGhost();
@@ -968,6 +1034,7 @@ export class Defense {
     const sp = SPECIALS.find(s => 'Digit' + s.key === code);
     if (sp) this.useSpecial(sp.id);
     if (code === 'KeyN') this.callWave();
+    if (code === 'KeyT') this.rotateView();
     if (code === 'Escape') this.selected = null;
   }
   focusSector(i) { this.camX = i * SL + SL / 2 - 4; }
@@ -985,7 +1052,7 @@ export class Defense {
 
   getPanel() {
     const t = this.selected;
-    if (!t?.alive) return null;
+    if (!t?.alive || !t.active) return null;
     return {
       title: `Watchtower · Sector ${t.sector + 1}`,
       lines: this._towerLines(t),
@@ -998,24 +1065,26 @@ export class Defense {
   getHoverInfo() {
     const h = this.hover;
     if (!h || this.drag?.moved) return null;
+    if (h.tower && !h.tower.active) return { title: `Watchtower · Sector ${h.sector + 1}`, lines: [['Status', 'Offline']], note: 'Only the front tower is active. This one was shut down when you advanced.' };
     if (h.tower) return { title: `Watchtower · Sector ${h.sector + 1}`, lines: this._towerLines(h.tower) };
     const n = h.sector + 1;
     if (this.towers[h.sector]?.alive) return null;
     if (this.canBuildSector(h.sector)) {
-      const cost = this.towerCost();
+      const cost = this.towerCost(h.sector);
       return {
         title: this.rubble[h.sector] ? `Rebuild Watchtower · Sector ${n}` : `Build Watchtower · Sector ${n}`,
         lines: [['Cost', `${cost} ◈`], ['You have', `${Math.floor(game.credits)} ◈`]],
-        note: 'One tower per sector. Placement inside the sector does not matter.',
+        note: 'One tower per sector. Placement inside the sector does not matter. Building here shuts down the previous tower.',
       };
     }
-    return { title: `Sector ${n}`, lines: [['Status', this.sectorState[h.sector] ? 'Fog of war' : 'Pitch dark']], note: `Clear Sector ${n - 1} first by building a tower there.` };
+    if (h.sector < this.cleared) return { title: `Sector ${n}`, lines: [['Status', 'Cleared']], note: 'Only the front sector can hold an active tower.' };
+    return { title: `Sector ${n}`, lines: [['Status', this.sectorState[h.sector] ? 'Fog of war' : 'Pitch dark']], note: `Beat all ${WAVES_PER_SECTOR} waves in Sector ${this.cleared + 1} first.` };
   }
 
   sectorInfo() {
     return this.sectorState.map((st, i) => {
       const known = this.enemies.filter(e => e.root.visible && Math.floor(e.x / SL) === i).length;
-      return { state: st, known, tower: !!this.towers[i]?.alive, ruin: !!this.rubble[i], center: i * SL + SL / 2 };
+      return { state: st, known, tower: !!this.towers[i]?.alive && this.towers[i].active, offline: !!this.towers[i]?.alive && !this.towers[i].active, ruin: !!this.rubble[i], center: i * SL + SL / 2 };
     });
   }
 
@@ -1023,7 +1092,8 @@ export class Defense {
   serialize() {
     return {
       wave: this.wave, waveTimer: Math.max(15, this.waveTimer), cleared: this.cleared, energy: this.energy, camX: this.camX,
-      towers: this.towers.map(t => t && { x: t.x, z: t.z, alive: t.alive, hp: t.hp }),
+      front: this.front, sectorWaves: this.sectorWaves, yaw: this.yaw,
+      towers: this.towers.map(t => t && { x: t.x, z: t.z, alive: t.alive, hp: t.hp, active: t.active }),
     };
   }
   load(d) {
@@ -1031,9 +1101,11 @@ export class Defense {
     this.waveTimer = d.waveTimer;
     this.energy = d.energy || 0;
     this.camX = d.camX ?? this.camX;
+    this.loading = true;
+    this.yaw = this.yawCur = d.yaw || 0;
     d.towers.forEach((t, s) => {
       if (!t) return;
-      if (t.alive) this._placeTower(s, t.x, t.z, t.hp);
+      if (t.alive) { this._placeTower(s, t.x, t.z, t.hp); if (t.active === false) this._shutDown(this.towers[s]); }
       else {
         this.rubble[s] = buildRubble();
         this.rubble[s].position.set(t.x, 0, t.z);
@@ -1041,7 +1113,11 @@ export class Defense {
         this.towers[s] = { sector: s, x: t.x, z: t.z, alive: false };
       }
     });
-    this.cleared = Math.max(this.cleared, d.cleared);
+    this.cleared = d.cleared;
+    this.front = d.front ?? -1;
+    this.sectorWaves = d.sectorWaves ?? 0;
+    this.loading = false;
+    this.waveTimer = d.waveTimer;
     this.refreshSectors();
   }
 }

@@ -304,8 +304,9 @@ export class Factory {
     this.scene.remove(b.mesh);
     for (let i = 0; i < N * N; i++) if (this.grid[i] === b) this.grid[i] = null;
     this.buildings.splice(this.buildings.indexOf(b), 1);
-    const refund = Math.floor(b.spent * 0.5);
-    if (refund > 0) earn(refund);
+    // half of everything spent on it (build + upgrades); belts refund 0.5 ◈ each
+    const refund = b.spent * 0.5;
+    game.credits += refund;
     if (this.selected === b) this.selected = null;
     emit('sfx', 'remove');
   }
@@ -637,6 +638,7 @@ export class Factory {
       }
     }
     if (def.upg && b.mk < 3) lines.push(['Next upgrade', `${def.upg[b.mk - 1]} ◈`]);
+    lines.push(['Refund if removed', `${+(b.spent * 0.5).toFixed(1)} ◈`]);
     return { title: `${def.name}${def.upg ? ' Mk' + b.mk : ''}`, lines, note: def.desc };
   }
 
@@ -662,7 +664,7 @@ export class Factory {
       buttons.push({ label: locked ? `Mk3 needs research` : `Upgrade → Mk${b.mk + 1} (${def.upg[b.mk - 1]} ◈)`, action: 'upgrade', disabled: locked || game.credits < def.upg[b.mk - 1] });
     }
     if (b.type !== 'teleporter') buttons.push({ label: 'Rotate (R)', action: 'rotate' });
-    if (!b.fixed) buttons.push({ label: `Remove (+${Math.floor(b.spent * 0.5)} ◈)`, action: 'remove' });
+    if (!b.fixed) buttons.push({ label: `Remove (+${+(b.spent * 0.5).toFixed(1)} ◈ refund)`, action: 'remove' });
     buttons.push({ label: 'Close', action: 'close' });
     return { ...info, buttons };
   }

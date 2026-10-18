@@ -142,6 +142,10 @@ body.split::after { content: ''; position: fixed; top: 0; bottom: 0; left: var(-
 .sector.view { outline: 2px solid rgba(70,200,255,0.6); }
 .sector .danger { color: var(--bad); font-weight: 700; }
 .sector .tw { color: var(--warn); }
+.sector .off { color: #555; }
+.modal-box a { color: var(--accent); }
+#credits-list .line { display: grid; grid-template-columns: 1fr 1fr 90px; gap: 10px; padding: 4px 0; border-bottom: 1px dashed rgba(255,255,255,0.06); font-size: 15px; }
+#credits-list .line span:nth-child(2), #credits-list .line span:nth-child(3) { color: var(--dim); }
 #specials { display: flex; gap: 8px; align-items: center; }
 .energy { width: 180px; height: 10px; border-radius: 5px; background: rgba(255,255,255,0.08); overflow: hidden; border: 1px solid var(--line); }
 .energy i { display: block; height: 100%; background: linear-gradient(90deg, #2080ff, #60e0ff); }
