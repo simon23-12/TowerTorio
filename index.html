@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TowerTorio</title>
+  <meta name="description" content="A tower defense × factory builder crossover. Hold the dark corridor, power your towers with an assembly line.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <div id="slowfx"></div>
+
+  <div id="hud" class="hidden">
+    <div id="topbar">
+      <div class="tb-group">
+        <div class="chip credits" title="Credits — earned by killing enemies">◈ <b id="credits">0</b></div>
+        <div class="chip" id="core-chip" title="Core integrity">♦ Core <b id="core">20</b></div>
+        <div class="chip" id="wave-chip">Wave <b id="wave">0</b> <span id="wavetimer"></span></div>
+        <button id="btn-call" class="btn small" title="Call the next wave early for bonus credits">Call ▶ <kbd>N</kbd></button>
+      </div>
+      <div class="tb-group tabs">
+        <button id="tab-defense" class="tab active">⚔ Defense</button>
+        <button id="tab-factory" class="tab">⚙ Factory</button>
+        <kbd class="tabkey">Tab</kbd>
+      </div>
+      <div class="tb-group">
+        <button id="btn-codex" class="btn small" title="Enemy codex">Codex <kbd>K</kbd></button>
+        <button id="btn-speed" class="btn small" title="Game speed (F)">×1</button>
+        <button id="btn-pause" class="btn small" title="Pause (P / Esc)">❚❚</button>
+        <button id="btn-mute" class="btn small" title="Mute (M)">♪</button>
+      </div>
+    </div>
+
+    <div id="leftcol">
+      <div class="card">
+        <h3>Tower Power <small>teleporter supply</small></h3>
+        <div id="stats"></div>
+      </div>
+      <div class="card" id="objective-card">
+        <h3>Objective</h3>
+        <div id="objective"></div>
+      </div>
+      <div class="card">
+        <h3>Incoming</h3>
+        <div id="incoming"></div>
+      </div>
+    </div>
+
+    <div id="panel" class="card hidden"></div>
+    <div id="toasts"></div>
+    <div id="alert" class="hidden"></div>
+
+    <div id="defense-bar" class="bottombar">
+      <div id="sectors"></div>
+      <div id="specials"></div>
+      <div class="hint">Click a glowing pad to build · drag or <kbd>A</kbd><kbd>D</kbd> to pan · wheel to zoom</div>
+    </div>
+    <div id="factory-bar" class="bottombar hidden">
+      <div id="hotbar"></div>
+      <div class="hint"><kbd>R</kbd> rotate · right-click remove · <kbd>Q</kbd> deselect · <kbd>WASD</kbd> / drag pan · wheel zoom</div>
+    </div>
+  </div>
+
+  <div id="splash" class="overlay">
+    <div class="logo">TOWER<span>TORIO</span></div>
+    <div class="tagline">Hold the dark corridor. Power it with industry.</div>
+    <div class="pulse">Click anywhere to start</div>
+  </div>
+
+  <div id="menu" class="overlay hidden">
+    <div class="logo">TOWER<span>TORIO</span></div>
+    <div class="tagline">Tower defense × factory automation</div>
+    <div class="menu-buttons">
+      <button class="btn big" id="btn-new">New Game</button>
+      <button class="btn big ghost" id="btn-howto">How to Play</button>
+      <button class="btn big ghost" id="btn-music">Music: On</button>
+    </div>
+    <div class="foot">First draft · built with three.js · everything procedural</div>
+  </div>
+
+  <div id="howto" class="overlay modal hidden">
+    <div class="modal-box">
+      <h2>How to Play</h2>
+      <div class="cols">
+        <div>
+          <h4>⚔ The Corridor</h4>
+          <p>Enemies pour out of a long, pitch-black corridor toward your <b>Core</b>. Only Sector 1 is visible — and only through fog.</p>
+          <p>Click a glowing <b>pad</b> to build a Watchtower. Towers burn away the fog, reveal the next sector and <b>identify</b> the enemies they see.</p>
+          <p>Your starting tower is pathetic. It <b>will</b> fall within the first few waves unless you power it up.</p>
+          <p>Kills earn <b>◈ Credits</b>.</p>
+        </div>
+        <div>
+          <h4>⚙ The Factory</h4>
+          <p>A separate map. Press <kbd>Tab</kbd> to switch. Place <b>Quarry Drills</b> on ore, belt the ore into <b>Refineries</b>, then belt the crystals into the <b>Teleporter</b>.</p>
+          <p>Each resource powers one stat: <span class="c-a">Alcamanium → Attack</span>, <span class="c-h">Vitrium → HP</span>, <span class="c-d">Quicksilite → Dexterity</span>, <span class="c-e">Voltarite → Energy</span>.</p>
+          <p>Tiers depend on the <b>steady flow</b> (crystals/min). Ore never runs out — but if supply drops, so does your tower.</p>
+          <p>Spend credits on new machines, upgrades and research.</p>
+        </div>
+      </div>
+      <p class="keys"><kbd>Tab</kbd> switch map · <kbd>P</kbd> pause · <kbd>F</kbd> speed · <kbd>M</kbd> mute · <kbd>K</kbd> codex · <kbd>T</kbd> research · <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> tools / specials</p>
+      <button class="btn" data-close>Got it</button>
+    </div>
+  </div>
+
+  <div id="codex" class="overlay modal hidden">
+    <div class="modal-box">
+      <h2>Enemy Codex</h2>
+      <p class="sub">Enemies are identified once they enter a tower's clear vision.</p>
+      <div id="codex-list" class="grid"></div>
+      <button class="btn" data-close>Close</button>
+    </div>
+  </div>
+
+  <div id="research" class="overlay modal hidden">
+    <div class="modal-box">
+      <h2>Research</h2>
+      <p class="sub">Spend credits earned in the corridor to expand your factory.</p>
+      <div id="research-list" class="grid"></div>
+      <button class="btn" data-close>Close</button>
+    </div>
+  </div>
+
+  <div id="pausemenu" class="overlay modal hidden">
+    <div class="modal-box small">
+      <h2>Paused</h2>
+      <button class="btn big" id="btn-resume">Resume</button>
+      <button class="btn big ghost" id="btn-howto2">How to Play</button>
+      <button class="btn big ghost" id="btn-quit">Quit to Menu</button>
+    </div>
+  </div>
+
+  <div id="gameover" class="overlay modal hidden">
+    <div class="modal-box small">
+      <h2 class="bad">The Core Has Fallen</h2>
+      <div id="go-stats"></div>
+      <button class="btn big" id="btn-retry">Try Again</button>
+      <button class="btn big ghost" id="btn-quit2">Main Menu</button>
+    </div>
+  </div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
