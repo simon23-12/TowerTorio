@@ -428,8 +428,11 @@ export class UI {
       el.classList.toggle('locked', !game.unlocked[k]);
       el.querySelector('.tier').textContent = game.unlocked[k] ? `T${t}` : '🔒';
       el.querySelector('.rate').textContent = game.unlocked[k] ? `${r.toFixed(1)} ${RESOURCES[k].name}/min` : `${RESOURCES[k].name} — research needed`;
-      el.querySelector('.next').textContent = next ? `next ${next}` : 'max';
-      el.querySelector('.bar i').style.width = (next ? Math.max(0, Math.min(1, (r - prev) / (next - prev))) * 100 : 100) + '%';
+      // at the stage's tier cap: say so instead of showing a "next" target that can't be reached here
+      const capped = next && t >= tierCap();
+      el.classList.toggle('capped', !!capped);
+      el.querySelector('.next').textContent = capped ? `stage max · T${t + 1} in Stage ${game.stage + 1}` : next ? `next ${next}` : 'max';
+      el.querySelector('.bar i').style.width = (next && !capped ? Math.max(0, Math.min(1, (r - prev) / (next - prev))) * 100 : 100) + '%';
     }
 
     // objective

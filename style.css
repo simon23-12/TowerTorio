@@ -279,3 +279,6 @@ body.split::after { content: ''; position: fixed; top: 0; bottom: 0; left: var(-
   #topbar { padding: 8px 10px; gap: 6px; }
   .tb-group { gap: 5px; }
 }
+.stat.capped .tier::after { content: ' 🔒'; font-size: 10px; }
+.stat.capped .next { color: var(--warn); }
+.stat.capped .bar i { background-image: repeating-linear-gradient(45deg, rgba(255,255,255,0.25) 0 4px, transparent 4px 8px); }
