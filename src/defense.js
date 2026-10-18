@@ -5,15 +5,16 @@ import {
   SECTORS, SECTOR_LEN, CORRIDOR_W, CORRIDOR_LEN,
 } from './state.js';
 import { stoneTexture, textTexture } from './textures.js';
-import { rollRunes, setRuneSlots } from './state.js';
+import { rollRunes, setRuneSlots, SPECIALS } from './state.js';
 
 const SL = SECTOR_LEN, L = CORRIDOR_LEN, HW = CORRIDOR_W / 2;
 const NV = 20;          // max vision sources in the fog shader
 const FOG_Y = 4.4;      // height of the fog plane
 export const WAVES_PER_SECTOR = 5;
-export let DIFF_STEP = 0.75; // difficulty gained per wave (40 waves in total)
+export let DIFF_STEP = 0.18; // difficulty gained per wave (40 waves per stage)
+export let STAGE_JUMP = 2.2;  // each stage starts this many stage-lengths further up the curve
 export let HP_QUAD = 0.03;
-export const setDiffStep = (v, q = HP_QUAD) => { DIFF_STEP = v; HP_QUAD = q; }; // for balance testing
+export const setDiffStep = (v, q = HP_QUAD, j = STAGE_JUMP) => { DIFF_STEP = v; HP_QUAD = q; STAGE_JUMP = j; }; // for balance testing
 
 export const ENEMY_TYPES = {
   crawler:  { name: 'Crawler',  hp: 14,   speed: 2.4, dmg: 3,  range: 1.4, atkRate: 1.0, reward: 5,   leak: 1,  color: '#ff5a4a', desc: 'Swarming bug. Weak alone, dangerous in numbers. Chews on any tower it passes.' },
@@ -24,12 +25,7 @@ export const ENEMY_TYPES = {
 };
 
 const ATTRACT_UP = { rapid: 1, twin: 2, chain: 2, crit: 1, regen: 1, frost: 1, bounty: 0 };
-
-export const SPECIALS = [
-  { id: 'slow', name: 'Time Warp',   key: '1', cost: 30, req: 1, desc: 'Slows all enemies by 60% for 6s' },
-  { id: 'hail', name: 'Energy Hail', key: '2', cost: 50, req: 2, desc: 'Rains energy bolts on the largest visible swarm' },
-  { id: 'over', name: 'Overdrive',   key: '3', cost: 40, req: 3, desc: 'Towers fire 2.5× faster for 6s' },
-];
+const OFFLINE_MAT = new THREE.MeshStandardMaterial({ color: 0x3a3c42, roughness: 1, metalness: 0 });
 
 // ---------- shared geometry & materials ----------
 const G = {
@@ -356,7 +352,7 @@ export class Defense {
     this.enemies = []; this.arrows = []; this.spits = []; this.bolts = []; this.particles = []; this.fx = [];
     this.wave = 0; this.waveTimer = attract ? 1 : 40; this.waveActive = false;
     this.spawnQueue = []; this.spawnTimer = 0; this.bonusPending = 0;
-    this.energy = 0; this.slowT = 0; this.overT = 0; this.hail = null;
+    this.energy = 0; this.slowT = 0; this.overT = 0; this.hail = null; this.spCd = {};
     this.cleared = 0;                                 // sectors 1..cleared have beaten all their waves
     this.front = -1;                                  // sector of the one active (front) tower
     this.sectorWaves = 0;                             // waves started in the front sector
@@ -655,9 +651,9 @@ export class Defense {
     t.active = false;
     this.lights[t.sector].intensity = 0;
     const m = t.mesh;
-    m.crystalMat.color.setHex(0x1a1c22);
     m.rings.forEach(r => { r.visible = false; });
     m.bar.visible = false;
+    m.body.traverse(o => { if (o.isMesh) o.material = OFFLINE_MAT; });
     if (this.selected === t) this.selected = null;
   }
 
@@ -732,7 +728,7 @@ export class Defense {
 
   // ----- waves -----
   // each stage starts where the previous one's difficulty ended
-  diff(w = this.wave) { return 1 + (w - 1 + (this.stage - 1) * SECTORS * WAVES_PER_SECTOR * 0.8) * DIFF_STEP; }
+  diff(w = this.wave) { return 1 + (w - 1 + (this.stage - 1) * SECTORS * WAVES_PER_SECTOR * STAGE_JUMP) * DIFF_STEP; }
   hpMul(w = this.wave) { const d = this.diff(w) - 1; return 1 + 0.15 * d + HP_QUAD * d * d; }
   dmgMul(w = this.wave) { return 1 + 0.06 * (this.diff(w) - 1); }
 
@@ -821,7 +817,8 @@ export class Defense {
     const c = new THREE.Color(e.T.color).getHex();
     this._burst(e.x, 0.8, e.z, c, e.T.boss ? 60 : 14, e.T.boss ? 9 : 5);
     if (!this.attract) {
-      let reward = Math.round(e.T.reward * (1 + 0.02 * (this.diff() - 1)) * this.stats().creditMul);
+      // per-kill bounty shrinks as waves get bigger, so income grows slower than enemy counts
+      let reward = Math.max(1, Math.round(e.T.reward / (1 + 0.06 * (this.diff() - 1)) * this.stats().creditMul));
       if (Math.random() < this.stats().bounty) {
         reward *= 2;
         this._burst(e.x, 1.4, e.z, 0xffd046, 10, 4);
@@ -915,14 +912,14 @@ export class Defense {
   }
 
   // ----- specials -----
-  specialsUnlocked() { return this.attract || meta.stagesCleared >= 1; }
+  // cooldown of a special in seconds; Energy tiers shorten it
+  specialCd(id) { return SPECIALS[id].cd * Math.max(0.4, 1 - 0.08 * this.stats().energyTier); }
   useSpecial(id) {
-    if (!this.specialsUnlocked()) return;
-    const sp = SPECIALS.find(s => s.id === id);
+    if (!id || this.attract || !game.specials.slots.includes(id)) return;
+    const sp = SPECIALS[id];
     const S = this.stats();
     const lv = game.specialUp?.[id] || 0;
-    if (S.energyTier < sp.req) { toast(`${sp.name} needs Energy Tier ${sp.req} (Voltarite)`, 'bad'); this._sfx('error'); return; }
-    if (this.energy < sp.cost) { toast(`Not enough energy for ${sp.name}`, 'bad'); this._sfx('error'); return; }
+    if ((this.spCd[id] || 0) > 0) { toast(`${sp.name} is recharging (${Math.ceil(this.spCd[id])}s)`, 'bad'); this._sfx('error'); return; }
     if (id === 'hail') {
       const vis = this.enemies.filter(e => this.stateAtX(e.x) === 2);
       if (!vis.length) { toast('No visible enemies to target', 'bad'); return; }
@@ -935,7 +932,7 @@ export class Defense {
     }
     if (id === 'slow') { this.slowT = 6 + 1.5 * lv; this.slowMul = 1 - (0.6 + 0.05 * lv); }
     if (id === 'over') { this.overT = 6 + 1.5 * lv; this.overMul = 2.5 + 0.25 * lv; }
-    this.energy -= sp.cost;
+    this.spCd[id] = this.specialCd(id);
     this._sfx('special');
   }
 
@@ -962,8 +959,7 @@ export class Defense {
       this.bonusPending = 0;
     }
 
-    if (S.energyMax > 0) this.energy = Math.min(S.energyMax, this.energy + S.energyRegen * dt);
-    else this.energy = 0;
+    for (const k in this.spCd) this.spCd[k] = Math.max(0, this.spCd[k] - dt);
     this.slowT = Math.max(0, this.slowT - dt);
     this.overT = Math.max(0, this.overT - dt);
     if (this.hail) {
@@ -1298,8 +1294,8 @@ export class Defense {
   }
   onWheel(ev) { this.zoom = Math.max(0.6, Math.min(2.4, this.zoom * (ev.deltaY > 0 ? 1.1 : 0.9))); }
   onKey(code) {
-    const sp = SPECIALS.find(s => 'Digit' + s.key === code);
-    if (sp) this.useSpecial(sp.id);
+    const slot = { Digit1: 0, Digit2: 1, Digit3: 2 }[code];
+    if (slot !== undefined) this.useSpecial(game.specials.slots[slot]);
     if (code === 'KeyN') this.callWave();
     if (code === 'KeyT') this.rotateView();
     if (code === 'Escape') this.selected = null;

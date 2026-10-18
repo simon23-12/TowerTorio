@@ -1,8 +1,9 @@
 // DOM HUD: stats, objectives, panels, toasts, codex, research.
 import { game, on, rate, buyResearch, buyUpgrade, buyTowerUpgrade, towerUpCost, RESOURCES, RES_KEYS, STAT_INFO, TIERS, RESEARCH, UPGRADES, TOWER_UPGRADES, TOWER_UP_MAX,
-  RUNES, RUNE_TIER_COLORS, grantRune, equipRune, unequipRune, SPECIAL_UPGRADES, specialUpCost, buySpecialUpgrade, meta, afford, towerUpLocked } from './state.js';
+  RUNES, RUNE_TIER_COLORS, grantRune, equipRune, unequipRune, SPECIAL_UPGRADES, specialUpCost, buySpecialUpgrade, meta, afford, towerUpLocked,
+  SPECIALS, buySpecial, equipSpecial, specialSlotCount, syncSpecialSlots, levelCap, tierCap, SPEED_COSTS, buySpeed, maxSpeed } from './state.js';
 import { buildingIcon, oreIcon, towerUpIcon, runeIcon } from './icons.js';
-import { ENEMY_TYPES, SPECIALS } from './defense.js';
+import { ENEMY_TYPES } from './defense.js';
 import { BUILD } from './factory.js';
 
 const $ = id => document.getElementById(id);
@@ -14,8 +15,9 @@ const OBJECTIVES = [
   { text: 'Place a <b>Refinery</b> (<kbd>3</kbd>) and connect the drill\'s arrow side to it with <b>belts</b> (<kbd>1</kbd>, click-drag).', done: () => game.flags.refined },
   { text: 'Belt the glowing crystals into the <b>Teleporter</b> in the center.', done: () => game.flags.delivered },
   { text: 'Reach <span class="c-a">Attack Tier 1</span>: a steady 6 crystals/min.', done: () => game.tier.alcamanium >= 1 },
-  { text: 'Earn credits and research <span class="c-h">Vitrium</span> (<kbd>Y</kbd>) for tower HP.', done: () => game.unlocked.vitrium },
-  { text: 'Clear sector after sector with towers and push all four stats. Survive!', done: () => false },
+  { text: 'Upgrade your tower (<kbd>U</kbd>) — in Stage 1 everything goes up to level 1.', done: () => Object.values(game.towerUp).reduce((a, b) => a + b, 0) >= 3 },
+  { text: 'Clear all 8 sectors to finish Stage 1 — it unlocks Stage 2, Vitrium and special attacks.', done: () => meta.stagesCleared >= 1 },
+  { text: 'Replay stages to farm credits, push the level caps and unlock all four elements by Stage 4.', done: () => false },
 ];
 
 export class UI {
@@ -73,6 +75,7 @@ export class UI {
     $('upgrades-list').addEventListener('click', ev => {
       const sp = ev.target.closest('[data-spup]');
       if (sp) { buySpecialUpgrade(sp.dataset.spup); this.renderUpgrades(); }
+      if (ev.target.closest('[data-speed]')) { buySpeed(); this.renderUpgrades(); }
     });
 
     $('tab-defense').onclick = () => handlers.setView('defense');
@@ -100,6 +103,7 @@ export class UI {
     $('specials').addEventListener('click', ev => {
       const s = ev.target.closest('[data-special]');
       if (s) handlers.defense().useSpecial(s.dataset.special);
+      else if (ev.target.closest('[data-sc-open]')) this.openModal('runes');
     });
     $('hotbar').addEventListener('click', ev => {
       const t = ev.target.closest('[data-tool]');
@@ -121,8 +125,7 @@ export class UI {
       </div>`;
     }).join('');
     $('sectors').innerHTML = Array.from({ length: 8 }, (_, i) => `<div class="sector" data-sector="${i}"></div>`).reverse().join('');
-    $('specials').innerHTML = `<div title="Energy (from Voltarite)"><div class="energy"><i></i></div></div>` +
-      SPECIALS.map(s => `<button class="btn small special" data-special="${s.id}" title="${s.desc}"><kbd>${s.key}</kbd> ${s.name}<small></small></button>`).join('');
+
     $('hotbar').innerHTML = Object.entries(BUILD).map(([id, b]) =>
       `<button class="btn tool" data-tool="${id}" title="${b.desc}"><kbd>${b.key}</kbd> <span class="ic">${b.icon}</span>${b.name}<small>${b.cost} ◈</small></button>`).join('') +
       `<button class="btn tool ghost" data-tool="upgrades" title="Upgrade every building of a type"><kbd>U</kbd> <span class="ic">⇪</span>Upgrades<small>machines</small></button>` +
@@ -164,14 +167,16 @@ export class UI {
   }
 
   renderResearch() {
-    $('research-list').innerHTML = RESEARCH.map(r => {
+    $('research-list').innerHTML = `<div class="upg-card done"><div class="upg-icon" style="border-color:${RESOURCES.alcamanium.css}">${oreIcon(RESOURCES.alcamanium.css)}</div>
+      <div class="upg-body"><h5 style="color:${RESOURCES.alcamanium.css}">Alcamanium</h5><div class="upg-stat">Powers <b>Attack</b></div><div class="upg-done">✓ Available from the start</div></div></div>` + RESEARCH.map(r => {
       const R = RESOURCES[r.res], st = STAT_INFO[R.stat], done = game.research.has(r.id);
-      return `<div class="upg-card ${done ? 'done' : ''}">
+      return `<div class="upg-card ${done ? 'done' : ''} ${!done && game.stage < r.stage ? 'locked-up' : ''}">
         <div class="upg-icon" style="border-color:${R.css}">${oreIcon(R.css)}<span class="mk-badge" style="background:${R.css}">${st.icon}</span></div>
         <div class="upg-body"><h5 style="color:${R.css}">${R.name}</h5>
           <div class="upg-stat">Powers <b>${st.name}</b></div>
           <div class="meta">${r.desc}</div>
           ${done ? '<div class="upg-done">✓ Unlocked — place drills on it</div>'
+            : game.stage < r.stage ? `<div class="upg-lock">🔒 Available from Stage ${r.stage}</div>`
             : `<button class="btn small" data-research="${r.id}" ${!afford(r.cost) ? 'disabled' : ''}>Unlock · ${r.cost} ◈</button>`}</div></div>`;
     }).join('');
   }
@@ -179,10 +184,13 @@ export class UI {
   renderUpgrades() {
     const tab = this.upgTab || 'factory';
     document.querySelectorAll('[data-utab]').forEach(b => b.classList.toggle('active', b.dataset.utab === tab));
-    $('upgrades-sub').innerHTML = tab === 'tower'
+    const capNote = ` <b>Stage ${game.stage}:</b> everything can go up to level ${levelCap()}, stat tiers up to T${tierCap()}.`;
+    $('upgrades-sub').innerHTML = (tab === 'tower'
       ? 'Tower upgrades apply to your active tower and every tower you build later. Most are <b>chances</b> that grow with each level.'
-      : 'Each upgrade improves <b>every</b> building of that type — the ones you have and the ones you build later.';
+      : tab === 'general' ? 'General upgrades for the whole game.'
+      : 'Each upgrade improves <b>every</b> building of that type — the ones you have and the ones you build later.') + capNote;
     if (tab === 'tower') { this.renderTowerUpgrades(); return; }
+    if (tab === 'general') { this.renderGeneral(); return; }
     const f = this.h.factory();
     const owned = t => f ? f.buildings.filter(b => b.type === t).length : 0;
     $('upgrades-list').innerHTML = Object.entries(UPGRADES).map(([type, u]) => {
@@ -194,37 +202,50 @@ export class UI {
           <div class="upg-stat">Now: <b>${u.stat(l)}</b></div>
           ${max ? '<div class="upg-done">✓ Fully upgraded</div>' : `<div class="upg-stat next">Mk${l + 2}: <b>${u.stat(l + 1)}</b></div>`}
           <div class="meta">You own ${owned(type)} · applies to all, including future ones</div>
-          ${max ? '' : `<button class="btn small" data-upgrade="${type}" ${!afford(u.costs[l]) ? 'disabled' : ''}>Upgrade → Mk${l + 2} · ${u.costs[l]} ◈</button>`}</div></div>`;
+          ${max ? '' : l >= levelCap() ? `<div class="upg-lock">🔒 Mk${l + 2} needs Stage ${l + 1}</div>`
+            : `<button class="btn small" data-upgrade="${type}" ${!afford(u.costs[l]) ? 'disabled' : ''}>Upgrade → Mk${l + 2} · ${u.costs[l]} ◈</button>`}</div></div>`;
     }).join('');
+  }
+
+  renderGeneral() {
+    const l = game.speedLvl || 0, max = l >= SPEED_COSTS.length;
+    $('upgrades-list').innerHTML = `<div class="upg-card ${l ? 'mk1' : ''}"><div class="upg-icon"><svg viewBox="0 0 100 100"><rect x="2" y="2" width="96" height="96" rx="6" fill="#141820"/>
+      <polygon points="18,30 46,50 18,70" fill="#46c8ff"/><polygon points="46,30 74,50 46,70" fill="#46c8ff" opacity="0.7"/><text x="80" y="86" font-size="22" fill="#ffd046" font-family="sans-serif" text-anchor="middle">×${maxSpeed()}</text></svg><span class="mk-badge">×${maxSpeed()}</span></div>
+      <div class="upg-body"><h5>Time Control</h5><div class="upg-stat">Now: <b>game speed up to ×${maxSpeed()}</b> (F cycles)</div>
+      ${max ? '<div class="upg-done">✓ Maxed out</div>' : `<div class="upg-stat next">Next: <b>×${maxSpeed() + 1}</b></div>
+      ${l >= levelCap() ? `<div class="upg-lock">🔒 Needs Stage ${l + 1}</div>` : `<button class="btn small" data-speed="1" ${!afford(SPEED_COSTS[l]) ? 'disabled' : ''}>Unlock ×${maxSpeed() + 1} · ${SPEED_COSTS[l]} ◈</button>`}`}</div></div>`;
   }
 
   renderTowerUpgrades() {
     $('upgrades-list').innerHTML = Object.entries(TOWER_UPGRADES).map(([id, u]) => {
       const l = game.towerUp[id] || 0, max = l >= TOWER_UP_MAX, cost = towerUpCost(id);
       if (towerUpLocked(id)) return `<div class="upg-card locked-up"><div class="upg-icon">${towerUpIcon(id, 0)}<span class="mk-badge">🔒</span></div>
-        <div class="upg-body"><h5>${u.name}</h5><div class="upg-stat">Lv 1: ${u.desc(1)}</div><div class="upg-lock">🔒 Unlocks after clearing Stage 1</div></div></div>`;
+        <div class="upg-body"><h5>${u.name}</h5><div class="upg-stat">Lv 1: ${u.desc(1)}</div><div class="upg-lock">🔒 Available from Stage ${u.req}</div></div></div>`;
       const pips = Array.from({ length: TOWER_UP_MAX }, (_, i) => `<i class="${i < l ? 'on' : ''}" style="${i < l ? 'background:#ffd046' : ''}"></i>`).join('');
       return `<div class="upg-card ${l ? 'mk1' : ''} ${max ? 'mk2' : ''}">
         <div class="upg-icon">${towerUpIcon(id, l)}<span class="mk-badge">Lv ${l}</span></div>
         <div class="upg-body"><h5>${u.name}</h5><div class="pips">${pips}</div>
           <div class="upg-stat">Now: <b>${l ? u.desc(l) : 'not installed'}</b></div>
           ${max ? '<div class="upg-done">✓ Maxed out</div>' : `<div class="upg-stat next">Lv ${l + 1}: <b>${u.desc(l + 1)}</b></div>`}
-          ${max ? '' : `<button class="btn small" data-tup="${id}" ${!afford(cost) ? 'disabled' : ''}>Upgrade → Lv ${l + 1} · ${cost} ◈</button>`}</div></div>`;
+          ${max ? '' : l >= levelCap() ? `<div class="upg-lock">🔒 Lv ${l + 1} needs Stage ${l + 1}</div>`
+            : `<button class="btn small" data-tup="${id}" ${!afford(cost) ? 'disabled' : ''}>Upgrade → Lv ${l + 1} · ${cost} ◈</button>`}</div></div>`;
     }).join('') + this._specialCards();
   }
 
   _specialCards() {
     if (!meta.stagesCleared) return `<div class="upg-card locked-card"><div class="upg-icon">${runeIcon('chronos', '#556', '#334')}</div>
-      <div class="upg-body"><h5>??? Special attacks</h5><div class="meta">Clear <b>Stage 1</b> to discover and upgrade special attacks.</div></div></div>`;
-    return `<h4 class="upg-section">Special attacks <small>use with 1 · 2 · 3 in the corridor (needs Energy)</small></h4>` +
-      Object.entries(SPECIAL_UPGRADES).map(([id, u]) => {
+      <div class="upg-body"><h5>??? Special attacks</h5><div class="meta">Clear <b>Stage 1</b> to discover special attacks.</div></div></div>`;
+    const owned = Object.keys(SPECIAL_UPGRADES).filter(id => game.specials.owned.includes(id));
+    return `<h4 class="upg-section">Special attacks <small>buy & equip them in Loadout (E) · upgrades from Stage 2: level N needs Stage N+1</small></h4>` +
+      (owned.length ? '' : '<div class="meta" style="grid-column:1/-1">You don\'t own any special attacks yet — unlock them in Loadout (E).</div>') +
+      owned.map(id => [id, SPECIAL_UPGRADES[id]]).map(([id, u]) => {
         const l = game.specialUp[id], max = l >= TOWER_UP_MAX, cost = specialUpCost(id);
         const pips = Array.from({ length: TOWER_UP_MAX }, (_, i) => `<i style="${i < l ? 'background:#b070ff' : ''}"></i>`).join('');
         return `<div class="upg-card ${l ? 'mk1' : ''}"><div class="upg-icon">${runeIcon({ slow: 'chronos', hail: 'storm', over: 'inferno' }[id], '#c890ff', '#b070ff')}<span class="mk-badge">Lv ${l}</span></div>
           <div class="upg-body"><h5>${u.name}</h5><div class="pips">${pips}</div>
           <div class="upg-stat">Now: <b>${u.desc(l)}</b></div>
           ${max ? '<div class="upg-done">✓ Maxed out</div>' : `<div class="upg-stat next">Lv ${l + 1}: <b>${u.desc(l + 1)}</b></div>
-          <button class="btn small" data-spup="${id}" ${!afford(cost) ? 'disabled' : ''}>Upgrade → Lv ${l + 1} · ${cost} ◈</button>`}</div></div>`;
+          ${l >= levelCap() - 1 ? `<div class="upg-lock">🔒 Lv ${l + 1} needs Stage ${l + 2}</div>` : `<button class="btn small" data-spup="${id}" ${!afford(cost) ? 'disabled' : ''}>Upgrade → Lv ${l + 1} · ${cost} ◈</button>`}`}</div></div>`;
       }).join('');
   }
 
@@ -250,18 +271,38 @@ export class UI {
       box.classList.remove('drag-active');
       box.querySelectorAll('.drop-hover').forEach(e => e.classList.remove('drop-hover'));
     });
+    box.addEventListener('click', ev => {
+      const b = ev.target.closest('[data-buysp]');
+      if (b) { buySpecial(b.dataset.buysp); this.renderRunes(); }
+    });
     box.addEventListener('dragover', ev => {
-      const t = ev.target.closest('[data-drop]');
+      const t = ev.target.closest('[data-drop], [data-spdrop]');
       if (!t) return;
       ev.preventDefault();
       box.querySelectorAll('.drop-hover').forEach(e => e !== t && e.classList.remove('drop-hover'));
       t.classList.add('drop-hover');
     });
     box.addEventListener('drop', ev => {
-      const t = ev.target.closest('[data-drop]');
+      const t = ev.target.closest('[data-drop], [data-spdrop]');
       if (!t) return;
       ev.preventDefault();
-      const [id, from] = ev.dataTransfer.getData('text/plain').split(':');
+      const data = ev.dataTransfer.getData('text/plain');
+      if (data.startsWith('sp|')) {
+        const [, sid, sfrom] = data.split('|');
+        if (t.dataset.spdrop === undefined) return;
+        const sl = game.specials.slots;
+        if (t.dataset.spdrop === 'inv') { if (sfrom !== 'inv') sl[+sfrom] = null; }
+        else {
+          const to = +t.dataset.spdrop, displaced = sl[to];
+          equipSpecial(sid, to);
+          if (sfrom !== 'inv' && displaced && displaced !== sid) sl[+sfrom] = displaced;
+        }
+        this._spKey = null;
+        this.renderRunes();
+        return;
+      }
+      if (t.dataset.drop === undefined) return;
+      const [id, from] = data.split(':');
       const slots = game.runes.slots;
       if (t.dataset.drop === 'inv') { if (from !== 'inv') unequipRune(+from); }
       else {
@@ -279,9 +320,30 @@ export class UI {
       ? `<div class="rune-slot filled" data-drop="${i}" data-drag="${id}:${i}" draggable="true" title="Drag back to the spare pile to remove">${runeIcon(id, RUNES[id].color, RUNE_TIER_COLORS[RUNES[id].tier])}<span>${RUNES[id].name}</span><small>${RUNES[id].desc}</small></div>`
       : `<div class="rune-slot" data-drop="${i}"><svg viewBox="0 0 100 100"><polygon points="50,4 90,27 90,73 50,96 10,73 10,27" fill="none" stroke="#334" stroke-width="4" stroke-dasharray="8 6"/></svg><span>Drop a rune here</span></div>`).join('') +
       (r.slots.length < 3 ? `<div class="rune-slot locked"><svg viewBox="0 0 100 100"><polygon points="50,4 90,27 90,73 50,96 10,73 10,27" fill="#0c0e13" stroke="#223" stroke-width="4"/><text x="50" y="62" font-size="34" text-anchor="middle" fill="#445">🔒</text></svg><span>${r.slots.length < 2 ? 'Unlocks after Sector 4' : 'Unlocks after Stage 1'}</span></div>` : '');
+    this.renderSpecials();
     const inv = r.owned.filter(id => !r.slots.includes(id));
     $('rune-inv').innerHTML = inv.length ? inv.map(id => this._runeCard(id, `data-drag="${id}:inv" draggable="true"`)).join('') : '<div class="meta">No spare runes. New runes drop when you clear Sectors 2, 4 and 6. Drag an equipped rune here to remove it.</div>';
   }
+  _spCard(id, attr, extra = '') {
+    const sp = SPECIALS[id];
+    return `<div class="rune-card sp-card" ${attr} style="border-color:${sp.color}">${runeIcon({ slow: 'chronos', hail: 'storm', over: 'inferno' }[id], sp.color, sp.color)}
+      <span class="rn" style="color:${sp.color}">${sp.name}</span><span class="rt">${sp.cd}s cooldown</span><span class="rd">${sp.desc}</span>${extra}</div>`;
+  }
+  renderSpecials() {
+    $('sp-locked').classList.toggle('hidden', !!meta.stagesCleared);
+    $('sp-body').classList.toggle('hidden', !meta.stagesCleared);
+    if (!meta.stagesCleared) return;
+    syncSpecialSlots();
+    const sp = game.specials;
+    $('sp-slots').innerHTML = sp.slots.map((id, i) => id
+      ? `<div class="rune-slot filled" data-spdrop="${i}" data-drag="sp|${id}|${i}" draggable="true" title="Drag to the pile to remove">${runeIcon({ slow: 'chronos', hail: 'storm', over: 'inferno' }[id], SPECIALS[id].color, SPECIALS[id].color)}<span>${i + 1} · ${SPECIALS[id].name}</span></div>`
+      : `<div class="rune-slot" data-spdrop="${i}"><svg viewBox="0 0 100 100"><polygon points="50,4 90,27 90,73 50,96 10,73 10,27" fill="none" stroke="#334" stroke-width="4" stroke-dasharray="8 6"/></svg><span>Key ${i + 1}: drop a special</span></div>`).join('') +
+      (sp.slots.length < 3 ? `<div class="rune-slot locked"><svg viewBox="0 0 100 100"><polygon points="50,4 90,27 90,73 50,96 10,73 10,27" fill="#0c0e13" stroke="#223" stroke-width="4"/><text x="50" y="62" font-size="34" text-anchor="middle" fill="#445">🔒</text></svg><span>Next slot after clearing Stage ${sp.slots.length + 1}</span></div>` : '');
+    $('sp-inv').innerHTML = Object.keys(SPECIALS).filter(id => !sp.slots.includes(id)).map(id => sp.owned.includes(id)
+      ? this._spCard(id, `data-drag="sp|${id}|inv" draggable="true"`)
+      : this._spCard(id, 'data-locked="1"', `<button class="btn small" data-buysp="${id}" ${!afford(SPECIALS[id].unlock) ? 'disabled' : ''}>Unlock · ${SPECIALS[id].unlock} ◈</button>`)).join('');
+  }
+
   showRuneStart() {
     $('rune-start-list').innerHTML = ['ember', 'stone'].map(id => this._runeCard(id, `data-runepick="${id}"`)).join('');
     $('rune-start').classList.remove('hidden');
@@ -317,15 +379,15 @@ export class UI {
       const R = RESOURCES[weakest], t = game.tier[weakest];
       out.push({ text: `<b style="color:${R.css}">${STAT_INFO[R.stat].name}</b> is your weakest stat (T${t}, ${rate(weakest).toFixed(0)}/min). Next tier needs ${TIERS[t + 1]} ${R.name} crystals/min — add drills and refineries.`, act: 'factory', label: 'Factory' });
     }
-    const up = Object.entries(UPGRADES).filter(([t, u]) => game.upgrades[t] < u.costs.length).sort((a, b) => a[1].costs[game.upgrades[a[0]]] - b[1].costs[game.upgrades[b[0]]])
+    const up = Object.entries(UPGRADES).filter(([t, u]) => game.upgrades[t] < u.costs.length && game.upgrades[t] < levelCap()).sort((a, b) => a[1].costs[game.upgrades[a[0]]] - b[1].costs[game.upgrades[b[0]]])
       .find(([t]) => t !== 'belt' || (f && f.buildings.some(b => b.type === 'belt')));
     if (up) {
       const [t, u] = up, c = u.costs[game.upgrades[t]];
       out.push({ text: `Upgrade all <b>${u.name}s</b> to Mk${game.upgrades[t] + 2} (${u.stat(game.upgrades[t] + 1)}) for ${c} ◈${spare >= c ? '' : ' — save up for it'}.`, act: 'upgrades', label: 'Upgrades' });
     }
-    const tu = Object.keys(TOWER_UPGRADES).filter(id => game.towerUp[id] < TOWER_UP_MAX).sort((a, b) => towerUpCost(a) - towerUpCost(b))[0];
+    const tu = Object.keys(TOWER_UPGRADES).filter(id => (game.towerUp[id] || 0) < Math.min(TOWER_UP_MAX, levelCap()) && !towerUpLocked(id)).sort((a, b) => towerUpCost(a) - towerUpCost(b))[0];
     if (tu) out.push({ text: `Tower upgrade: <b>${TOWER_UPGRADES[tu].name}</b> Lv ${game.towerUp[tu] + 1} — ${TOWER_UPGRADES[tu].desc(game.towerUp[tu] + 1)} (${towerUpCost(tu)} ◈).`, act: 'tower', label: 'Tower' });
-    const r = RESEARCH.find(r => !game.research.has(r.id));
+    const r = RESEARCH.find(r => !game.research.has(r.id) && game.stage >= r.stage);
     if (r) out.push({ text: `Research <b style="color:${RESOURCES[r.res].css}">${RESOURCES[r.res].name}</b> (${r.cost} ◈) to start powering <b>${STAT_INFO[RESOURCES[r.res].stat].name}</b>.`, act: 'research', label: 'Research' });
     out.push({ text: `Credits only come from kills — keep <b>${nextCost} ◈</b> for the next tower, or you can't advance (removing buildings refunds 50%).` });
     return out.slice(0, 5);
@@ -350,7 +412,7 @@ export class UI {
     const inc = defense.incomingInfo();
     $('wave').textContent = game.wave;
     $('stage').textContent = game.stage;
-    $('specials').classList.toggle('hidden', !meta.stagesCleared);
+    $('specials').classList.toggle('hidden', !specialSlotCount());
     const rk = game.runes.slots.join(',');
     if (this._rk !== rk) {
       this._rk = rk;
@@ -428,13 +490,18 @@ export class UI {
         const txt = s.state >= 1 ? `S${i + 1}${s.tower ? ' <span class="tw">♜</span>' : s.offline ? ' <span class="off">♜</span>' : s.ruin ? ' <span class="danger">✕</span>' : ''}${s.known ? ` <span class="danger">☠${s.known}</span>` : ''}` : '▓';
         if (el._t !== txt) { el._t = txt; el.innerHTML = txt; }
       });
-      const S = defense.stats();
-      document.querySelector('.energy i').style.width = (S.energyMax ? defense.energy / S.energyMax * 100 : 0) + '%';
-      document.querySelectorAll('.special').forEach(b => {
-        const sp = SPECIALS.find(s => s.id === b.dataset.special);
-        const locked = S.energyTier < sp.req;
-        b.disabled = locked || defense.energy < sp.cost;
-        const sub = locked ? `needs Energy T${sp.req}` : `${sp.cost} energy`;
+      const spKey = game.specials.slots.join(',');
+      if (this._spKey !== spKey) {
+        this._spKey = spKey;
+        $('specials').innerHTML = game.specials.slots.map((id, i) => id
+          ? `<button class="btn small special" data-special="${id}" title="${SPECIALS[id].desc}"><i class="cd"></i><kbd>${i + 1}</kbd> ${SPECIALS[id].name}<small></small></button>`
+          : `<button class="btn small special ghost" data-sc-open="1" title="Equip a special attack in Loadout (E)"><kbd>${i + 1}</kbd> empty<small>Loadout (E)</small></button>`).join('');
+      }
+      document.querySelectorAll('.special[data-special]').forEach(b => {
+        const id = b.dataset.special, left = defense.spCd[id] || 0, full = defense.specialCd(id);
+        b.querySelector('.cd').style.width = (left > 0 ? (1 - left / full) * 100 : 100) + '%';
+        b.classList.toggle('ready', left <= 0);
+        const sub = left > 0 ? `${Math.ceil(left)}s` : 'ready';
         const sm = b.querySelector('small');
         if (sm.textContent !== sub) sm.textContent = sub;
       });

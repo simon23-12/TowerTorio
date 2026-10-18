@@ -198,6 +198,24 @@ body.split::after { content: ''; position: fixed; top: 0; bottom: 0; left: var(-
 [data-drag] { cursor: grab; } .dragging { opacity: 0.4; }
 #rune-inv { min-height: 120px; border: 1px dashed var(--line); border-radius: 10px; padding: 10px; }
 
+/* special attack buttons with cooldown fill */
+.special { position: relative; overflow: hidden; }
+.special .cd { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--accent); width: 0; }
+.special.ready { box-shadow: 0 0 12px rgba(70,200,255,0.45); }
+#sp-inv { min-height: 110px; border: 1px dashed var(--line); border-radius: 10px; padding: 10px; }
+.sp-card[data-locked] { cursor: default; opacity: 0.75; }
+.sp-card .btn { margin-top: 6px; }
+.upg-tabs .tab:nth-child(3) { border-radius: 0 6px 6px 0; margin-left: -1px; }
+.upg-tabs .tab:nth-child(2) { border-radius: 0; }
+
+.stage-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+.stage-card { display: flex; flex-direction: column; gap: 4px; text-align: left; padding: 14px; background: rgba(255,255,255,0.03); border: 1px solid var(--line); border-radius: 10px; color: var(--text); cursor: pointer; font-family: 'Rajdhani', sans-serif; }
+.stage-card:hover { border-color: var(--accent); box-shadow: 0 0 16px rgba(70,200,255,0.3); }
+.stage-card.current { border-color: var(--warn); }
+.stage-card .sn { font-family: 'Orbitron', sans-serif; font-size: 18px; }
+.stage-card .st { color: var(--good); font-size: 13px; }
+.stage-card .sd { color: var(--dim); font-size: 14px; }
+
 /* runes */
 .rune-row { display: flex; flex-wrap: wrap; gap: 12px; margin: 4px 0 10px; }
 .rune-card { width: 170px; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 10px; background: rgba(255,255,255,0.03); border: 2px solid; border-radius: 10px; color: var(--text); font-family: 'Rajdhani', sans-serif; cursor: pointer; transition: transform .12s, box-shadow .12s; }

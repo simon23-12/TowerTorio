@@ -17,7 +17,7 @@ export const STAT_INFO = {
   attack:    { name: 'Attack',    icon: '⚔', desc: 'Damage per shot' },
   hp:        { name: 'HP',        icon: '✚', desc: 'Tower health and regeneration' },
   dexterity: { name: 'Dexterity', icon: '➶', desc: 'Reach beyond its sector, crit chance, projectile speed' },
-  energy:    { name: 'Energy',    icon: '⚡', desc: 'Fire rate, extra weapons, special attacks' },
+  energy:    { name: 'Energy',    icon: '⚡', desc: 'Fire rate, extra weapons, faster special-attack cooldowns' },
 };
 
 // Crystals per minute needed for each tier (index = tier).
@@ -27,10 +27,12 @@ export const MK_MULT = [1, 1.6, 2.5];
 export const BELT_SPEEDS = [1.2, 2.0, 3.2];
 
 // Research unlocks new elements to quarry and refine.
+// Elements open up stage by stage: Stage 1 only has Alcamanium, Stage 2 adds Vitrium,
+// Stage 3 Quicksilite and Stage 4 Voltarite. Once researched they stay unlocked.
 export const RESEARCH = [
-  { id: 'vitrium',     res: 'vitrium',     cost: 150, desc: 'Quarry and refine green Vitrium. Powers tower HP and regeneration.', apply: () => { game.unlocked.vitrium = true; } },
-  { id: 'quicksilite', res: 'quicksilite', cost: 250, desc: 'Quarry and refine yellow Quicksilite. Powers Dexterity: reach, crits, projectile speed.', apply: () => { game.unlocked.quicksilite = true; } },
-  { id: 'voltarite',   res: 'voltarite',   cost: 400, desc: 'Quarry and refine blue Voltarite. Powers Energy: fire rate, extra weapons, special attacks.', apply: () => { game.unlocked.voltarite = true; } },
+  { id: 'vitrium',     res: 'vitrium',     stage: 2, cost: 150, desc: 'Quarry and refine green Vitrium. Powers tower HP and regeneration.', apply: () => { game.unlocked.vitrium = true; } },
+  { id: 'quicksilite', res: 'quicksilite', stage: 3, cost: 300, desc: 'Quarry and refine yellow Quicksilite. Powers Dexterity: reach, crits, projectile speed.', apply: () => { game.unlocked.quicksilite = true; } },
+  { id: 'voltarite',   res: 'voltarite',   stage: 4, cost: 500, desc: 'Quarry and refine blue Voltarite. Powers Energy: fire rate, extra weapons, special attacks.', apply: () => { game.unlocked.voltarite = true; } },
 ];
 
 // Upgrades improve every building of a type at once (level 0 = Mk1).
@@ -42,9 +44,15 @@ export const UPGRADES = {
   teleporter: { name: 'Teleporter',    costs: [200, 500], stat: l => `each crystal counts ×${TELE_MULT[l]}` },
 };
 
+// Everything can be upgraded once per stage: level N needs Stage N.
+export const levelCap = () => game.stage;
+// highest stat tier the teleporter flow can reach in the current stage
+export const tierCap = () => [6, 8, 9, 10][Math.min(game.stage, 4) - 1];
+
 export function buyUpgrade(type) {
   const u = UPGRADES[type], lvl = game.upgrades[type];
   if (lvl >= u.costs.length) return;
+  if (lvl >= levelCap()) { toast(`Mk${lvl + 2} needs Stage ${lvl + 1}`, 'bad'); emit('sfx', 'error'); return; }
   if (!spend(u.costs[lvl])) return;
   game.upgrades[type] = lvl + 1;
   if (type === 'belt') game.beltTier = lvl + 1;
@@ -63,21 +71,22 @@ export const TOWER_UPGRADES = {
   regen:  { name: 'Nanite Repair',   icon: 'regen',  base: 60,  desc: l => `+${(l * 1.5).toFixed(1)} HP/s repair, ${l * 6}% chance to block a hit` },
   frost:  { name: 'Cryo Rounds',     icon: 'frost',  base: 80,  desc: l => `${l * 9}% chance to slow the target by 50% for 2.5s` },
   bounty: { name: 'Bounty Protocol', icon: 'bounty', base: 100, desc: l => `${l * 8}% chance for double credits on a kill` },
-  // unlocked once Stage 1 has been cleared
-  power:   { name: 'Overcharged Core', icon: 'power',   base: 200, req: 1, desc: l => `+${l * 10}% damage` },
-  splash:  { name: 'Shockwave Lens',   icon: 'splash',  base: 220, req: 1, desc: l => `${l * 8}% chance a hit explodes for 50% damage around the target` },
-  execute: { name: 'Executioner',      icon: 'execute', base: 240, req: 1, desc: l => `${l * 5}% chance to instantly finish an enemy below 25% HP (not bosses)` },
-  plating: { name: 'Fortress Plating', icon: 'plating', base: 200, req: 1, desc: l => `+${l * 15}% max HP, −${l * 4}% damage taken` },
-  barrel:  { name: 'Long Barrel',      icon: 'barrel',  base: 180, req: 1, desc: l => `+${(l * 1.5).toFixed(1)} m reach beyond the sector` },
+  barrel:  { name: 'Long Range Optics', icon: 'barrel', base: 70,  desc: l => `+${(l * 2.5).toFixed(1)} m range — starts shooting enemies earlier` },
+  // only available from Stage 2 on
+  power:   { name: 'Overcharged Core', icon: 'power',   base: 200, req: 2, desc: l => `+${l * 10}% damage` },
+  splash:  { name: 'Shockwave Lens',   icon: 'splash',  base: 220, req: 2, desc: l => `${l * 8}% chance a hit explodes for 50% damage around the target` },
+  execute: { name: 'Executioner',      icon: 'execute', base: 240, req: 2, desc: l => `${l * 5}% chance to instantly finish an enemy below 25% HP (not bosses)` },
+  plating: { name: 'Fortress Plating', icon: 'plating', base: 200, req: 2, desc: l => `+${l * 15}% max HP, −${l * 4}% damage taken` },
 };
-export const towerUpLocked = id => (TOWER_UPGRADES[id].req || 0) > meta.stagesCleared;
+export const towerUpLocked = id => (TOWER_UPGRADES[id].req || 0) > game.stage;
 export const TOWER_UP_MAX = 5;
 export const towerUpCost = (id, l = game.towerUp[id] || 0) => Math.round(TOWER_UPGRADES[id].base * Math.pow(1.7, l));
 
 export function buyTowerUpgrade(id) {
   const l = game.towerUp[id] || 0;
   if (l >= TOWER_UP_MAX) return;
-  if (towerUpLocked(id)) { toast('Unlocks after clearing Stage 1', 'bad'); emit('sfx', 'error'); return; }
+  if (towerUpLocked(id)) { toast(`Available from Stage ${TOWER_UPGRADES[id].req} on`, 'bad'); emit('sfx', 'error'); return; }
+  if (l >= levelCap()) { toast(`Level ${l + 1} needs Stage ${l + 1}`, 'bad'); emit('sfx', 'error'); return; }
   if (!spend(towerUpCost(id))) return;
   game.towerUp[id] = l + 1;
   toast(`${TOWER_UPGRADES[id].name} level ${l + 1}: ${TOWER_UPGRADES[id].desc(l + 1)}`, 'good');
@@ -140,19 +149,66 @@ export function rollRunes(tiers, n = 2) {
   return pool.sort(() => Math.random() - 0.5).slice(0, n);
 }
 
-// ---------- special attack upgrades (available after Stage 1) ----------
+// ---------- special attacks ----------
+// Bought once (from Stage 2 on), then equipped like runes. Slots: one per stage cleared, up to 3.
+// They run on cooldowns; Energy (Voltarite) makes the cooldowns shorter.
+export const SPECIALS = {
+  slow: { name: 'Time Warp',   unlock: 300, cd: 50, color: '#80b0ff', desc: 'Slows every enemy in the corridor' },
+  hail: { name: 'Energy Hail', unlock: 400, cd: 60, color: '#a0f0ff', desc: 'Rains energy bolts on the biggest visible swarm' },
+  over: { name: 'Overdrive',   unlock: 350, cd: 55, color: '#ffa040', desc: 'Your tower fires much faster for a while' },
+};
 export const SPECIAL_UPGRADES = {
   slow: { name: 'Time Warp',   base: 150, desc: l => `${(6 + 1.5 * l).toFixed(1)}s, slows enemies by ${60 + 5 * l}%` },
   hail: { name: 'Energy Hail', base: 180, desc: l => `${20 + 5 * l} bolts at ×${(3 + 0.5 * l).toFixed(1)} tower damage` },
   over: { name: 'Overdrive',   base: 160, desc: l => `${(6 + 1.5 * l).toFixed(1)}s of ×${(2.5 + 0.25 * l).toFixed(2)} fire rate` },
 };
+export const specialSlotCount = () => Math.min(3, meta.stagesCleared);
+export function syncSpecialSlots() {
+  const sp = game.specials, n = specialSlotCount();
+  while (sp.slots.length < n) sp.slots.push(null);
+}
+export function buySpecial(id) {
+  if (!meta.stagesCleared) { toast('Special attacks become available after clearing Stage 1', 'bad'); return; }
+  if (game.specials.owned.includes(id)) return;
+  if (!spend(SPECIALS[id].unlock)) return;
+  game.specials.owned.push(id);
+  syncSpecialSlots();
+  const empty = game.specials.slots.indexOf(null);
+  if (empty >= 0) game.specials.slots[empty] = id;
+  toast(`${SPECIALS[id].name} unlocked${empty >= 0 ? ' and equipped' : ' — equip it in Loadout (E)'}`, 'good');
+  emit('sfx', 'upgrade');
+}
+export function equipSpecial(id, slot) {
+  const sl = game.specials.slots;
+  const cur = sl.indexOf(id);
+  if (cur >= 0) sl[cur] = null;
+  if (slot == null) slot = sl.indexOf(null);
+  if (slot < 0 || slot >= sl.length) return;
+  sl[slot] = id;
+  emit('sfx', 'click');
+}
 export const specialUpCost = (id, l = game.specialUp[id]) => Math.round(SPECIAL_UPGRADES[id].base * Math.pow(1.7, l));
 export function buySpecialUpgrade(id) {
   const l = game.specialUp[id];
-  if (l >= TOWER_UP_MAX || !meta.stagesCleared) return;
+  if (l >= TOWER_UP_MAX || !game.specials.owned.includes(id)) return;
+  if (l >= levelCap() - 1) { toast(`Level ${l + 1} needs Stage ${l + 2}`, 'bad'); emit('sfx', 'error'); return; }
   if (!spend(specialUpCost(id))) return;
   game.specialUp[id] = l + 1;
   toast(`${SPECIAL_UPGRADES[id].name} level ${l + 1}: ${SPECIAL_UPGRADES[id].desc(l + 1)}`, 'good');
+  emit('sfx', 'upgrade');
+}
+
+// ---------- game speed ----------
+// ×2 from the start; ×3, ×4, ×5 are bought (one per stage, like every other upgrade).
+export const SPEED_COSTS = [150, 350, 600];
+export const maxSpeed = () => 2 + (game.speedLvl || 0);
+export function buySpeed() {
+  const l = game.speedLvl || 0;
+  if (l >= SPEED_COSTS.length) return;
+  if (l >= levelCap()) { toast(`×${l + 3} speed needs Stage ${l + 1}`, 'bad'); emit('sfx', 'error'); return; }
+  if (!spend(SPEED_COSTS[l])) return;
+  game.speedLvl = l + 1;
+  toast(`Game speed up to ×${maxSpeed()} unlocked (F)`, 'good');
   emit('sfx', 'upgrade');
 }
 
@@ -185,6 +241,8 @@ export function resetGame() {
     towerUp: Object.fromEntries(Object.keys(TOWER_UPGRADES).map(k => [k, 0])),
     specialUp: { slow: 0, hail: 0, over: 0 },
     runes: { owned: [], slots: [null] },
+    specials: { owned: [], slots: [] },
+    speedLvl: 0,
     stage: 1,
     discovered: new Set(),
     stats: { kills: 0, delivered: 0, earned: 0 },
@@ -218,6 +276,7 @@ export function earn(n) { game.credits += n; game.stats.earned += n; }
 export function buyResearch(id) {
   const r = RESEARCH.find(r => r.id === id);
   if (!r || game.research.has(id)) return;
+  if (game.stage < r.stage) { toast(`${RESOURCES[r.res].name} can only be researched from Stage ${r.stage} on`, 'bad'); emit('sfx', 'error'); return; }
   if (!spend(r.cost)) return;
   game.research.add(id);
   r.apply();
@@ -235,7 +294,8 @@ export function updateEconomy(dt) {
     const rt = rate(r);
     let t = game.tier[r];
     const old = t;
-    while (t < TIERS.length - 1 && rt >= TIERS[t + 1]) t++;
+    while (t < tierCap() && rt >= TIERS[t + 1]) t++;
+    if (t > tierCap()) t = tierCap();
     while (t > 0 && rt < TIERS[t] * 0.85) t--;
     if (t !== old) {
       game.tier[r] = t;
@@ -250,13 +310,13 @@ export function towerStats(t = game.tier, u = game.towerUp, r = runeMods()) {
   const a = t.alcamanium, h = t.vitrium, d = t.quicksilite, e = t.voltarite;
   return {
     damage: 4 * Math.pow(1.6, a) * (1 + (r.dmg || 0)) * (1 + 0.1 * (u.power || 0)),
-    maxHP: (100 + 120 * h + 25 * h * h) * (1 + (r.hp || 0)) * (1 + 0.15 * (u.plating || 0)),
+    maxHP: (160 + 120 * h + 25 * h * h) * (1 + (r.hp || 0)) * (1 + 0.15 * (u.plating || 0)),
     armor: 0.04 * (u.plating || 0),
     splash: 0.08 * (u.splash || 0),
     execute: 0.05 * (u.execute || 0),
-    regen: 0.5 + 2.5 * h + 1.5 * u.regen + (r.regen || 0),
+    regen: 1 + 2.5 * h + 1.5 * u.regen + (r.regen || 0),
     block: Math.min(0.6, 0.06 * u.regen + (r.block || 0)),
-    reach: 1 + 1.5 * d + 1.5 * (u.barrel || 0),
+    reach: 2 + 1.5 * d + 2.5 * (u.barrel || 0),
     crit: Math.min(0.75, 0.05 + 0.06 * d + 0.05 * u.crit + (r.crit || 0)),
     critMul: 2 + 0.15 * d + 0.25 * u.crit,
     projSpeed: 20 + 5 * d,

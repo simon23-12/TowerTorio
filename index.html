@@ -69,7 +69,7 @@
     <div id="tooltip" class="hidden"></div>
     <div id="defense-bar" class="bottombar">
       <div class="tc-row"><div id="towercost"></div><button class="btn small" id="btn-tower-upgrades" title="Upgrade your tower (U)">⇪ Tower Upgrades <kbd>U</kbd></button>
-        <div id="runebar" title="Equipped runes — click to manage"></div><button class="btn small" id="btn-runes" title="Manage runes (E)">Runes <kbd>E</kbd></button></div>
+        <div id="runebar" title="Equipped runes — click to manage"></div><button class="btn small" id="btn-runes" title="Runes and special attacks (E)">Loadout <kbd>E</kbd></button></div>
       <div id="specials"></div>
       <div class="hint">Click inside the lit front sector to build · drag / <kbd>WASD</kbd> pan · <kbd>T</kbd> rotate · wheel zoom</div>
     </div>
@@ -138,7 +138,7 @@
   <div id="upgrades" class="overlay modal hidden">
     <div class="modal-box">
       <h2>Upgrades</h2>
-      <div class="upg-tabs"><button class="tab" data-utab="tower">♜ Tower</button><button class="tab" data-utab="factory">⚙ Factory</button></div>
+      <div class="upg-tabs"><button class="tab" data-utab="tower">♜ Tower</button><button class="tab" data-utab="factory">⚙ Factory</button><button class="tab" data-utab="general">⏱ General</button></div>
       <p class="sub" id="upgrades-sub"></p>
       <div id="upgrades-list" class="upg-grid"></div>
       <button class="btn" data-close>Close</button>
@@ -166,12 +166,20 @@
 
   <div id="runes" class="overlay modal hidden">
     <div class="modal-box">
-      <h2>Runes</h2>
+      <h2>Loadout</h2>
       <p class="sub">Runes are set into your tower and boost it while equipped. Drag a spare rune onto a slot to equip it, between slots to swap, or back to the spare pile to remove it.</p>
       <h4>Equipped</h4>
       <div id="rune-slots" class="rune-row"></div>
       <h4>Spare runes</h4>
       <div id="rune-inv" class="rune-row" data-drop="inv"></div>
+      <div id="sp-section">
+        <h4>Special attacks</h4>
+        <div id="sp-locked" class="meta">🔒 Special attacks are discovered after clearing <b>Stage 1</b>. Buy them here, then drag them into a slot — one slot per stage cleared (max 3). Keys 1 · 2 · 3 fire them.</div>
+        <div id="sp-body">
+          <div id="sp-slots" class="rune-row"></div>
+          <div id="sp-inv" class="rune-row" data-spdrop="inv"></div>
+        </div>
+      </div>
       <button class="btn" data-close>Close</button>
     </div>
   </div>
@@ -190,6 +198,7 @@
       <h2 class="stage-title">STAGE CLEARED</h2>
       <div id="stc-body"></div>
       <button class="btn big" id="btn-next-stage">Continue to Stage 2</button>
+      <button class="btn big ghost" id="btn-stage-pick">Choose a Stage…</button>
       <button class="btn big ghost" id="btn-stage-menu">Main Menu</button>
     </div>
   </div>
@@ -205,10 +214,20 @@
     </div>
   </div>
 
+  <div id="stage-select" class="overlay modal hidden">
+    <div class="modal-box">
+      <h2>Choose a Stage</h2>
+      <p class="sub">Replay any stage you've reached. Your factory, upgrades, research, runes and specials all come with you — but the level cap and stat-tier cap follow the stage you pick.</p>
+      <div id="stage-list" class="stage-grid"></div>
+      <button class="btn ghost" id="btn-stage-cancel">Cancel</button>
+    </div>
+  </div>
+
   <div id="pausemenu" class="overlay modal hidden">
     <div class="modal-box small">
       <h2>Paused</h2>
       <button class="btn big" id="btn-resume">Resume</button>
+      <button class="btn big ghost hidden" id="btn-change-stage">Change Stage…</button>
       <button class="btn big ghost btn-open-options">Options</button>
       <button class="btn big ghost" id="btn-howto2">How to Play</button>
       <button class="btn big ghost btn-fullscreen">⛶ Fullscreen</button>
