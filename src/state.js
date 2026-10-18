@@ -26,14 +26,32 @@ export const FLOW_TAU = 20; // seconds, smoothing window for the delivery rate
 export const MK_MULT = [1, 1.6, 2.5];
 export const BELT_SPEEDS = [1.2, 2.0, 3.2];
 
+// Research unlocks new elements to quarry and refine.
 export const RESEARCH = [
-  { id: 'vitrium',     name: 'Vitrium Refining',     cost: 150, desc: 'Mine and refine green Vitrium → tower HP.', apply: () => { game.unlocked.vitrium = true; } },
-  { id: 'quicksilite', name: 'Quicksilite Refining', cost: 250, desc: 'Mine and refine yellow Quicksilite → Dexterity.', apply: () => { game.unlocked.quicksilite = true; } },
-  { id: 'voltarite',   name: 'Voltarite Refining',   cost: 400, desc: 'Mine and refine blue Voltarite → Energy & specials.', apply: () => { game.unlocked.voltarite = true; } },
-  { id: 'belt2',       name: 'Fast Belts',           cost: 120, desc: 'All belts move items 66% faster.', apply: () => { game.beltTier = Math.max(game.beltTier, 1); } },
-  { id: 'belt3',       name: 'Express Belts',        cost: 350, req: 'belt2', desc: 'All belts move items 60% faster again.', apply: () => { game.beltTier = 2; } },
-  { id: 'mk3',         name: 'Mk3 Engineering',      cost: 220, desc: 'Allows machines to be upgraded to Mk3.', apply: () => {} },
+  { id: 'vitrium',     res: 'vitrium',     cost: 150, desc: 'Quarry and refine green Vitrium. Powers tower HP and regeneration.', apply: () => { game.unlocked.vitrium = true; } },
+  { id: 'quicksilite', res: 'quicksilite', cost: 250, desc: 'Quarry and refine yellow Quicksilite. Powers Dexterity: reach, crits, projectile speed.', apply: () => { game.unlocked.quicksilite = true; } },
+  { id: 'voltarite',   res: 'voltarite',   cost: 400, desc: 'Quarry and refine blue Voltarite. Powers Energy: fire rate, extra weapons, special attacks.', apply: () => { game.unlocked.voltarite = true; } },
 ];
+
+// Upgrades improve every building of a type at once (level 0 = Mk1).
+export const TELE_MULT = [1, 1.25, 1.5];
+export const UPGRADES = {
+  miner:      { name: 'Quarry Drill',  costs: [80, 240],  stat: l => `${Math.round(30 * MK_MULT[l])} ore/min per drill` },
+  refinery:   { name: 'Refinery',      costs: [120, 320], stat: l => `up to ${Math.round(30 * MK_MULT[l])} crystals/min each` },
+  belt:       { name: 'Conveyor Belt', costs: [120, 350], stat: l => `${BELT_SPEEDS[l].toFixed(1)} tiles/s` },
+  teleporter: { name: 'Teleporter',    costs: [200, 500], stat: l => `each crystal counts ×${TELE_MULT[l]}` },
+};
+
+export function buyUpgrade(type) {
+  const u = UPGRADES[type], lvl = game.upgrades[type];
+  if (lvl >= u.costs.length) return;
+  if (!spend(u.costs[lvl])) return;
+  game.upgrades[type] = lvl + 1;
+  if (type === 'belt') game.beltTier = lvl + 1;
+  toast(`${u.name}s upgraded to Mk${lvl + 2}: ${u.stat(lvl + 1)}`, 'good');
+  emit('sfx', 'tier');
+  emit('upgraded', type);
+}
 
 export const game = {};
 
@@ -53,6 +71,7 @@ export function resetGame() {
     unlocked: Object.fromEntries(RES_KEYS.map(k => [k, RESOURCES[k].unlockCost === 0])),
     research: new Set(),
     beltTier: 0,
+    upgrades: { miner: 0, refinery: 0, belt: 0, teleporter: 0 },
     discovered: new Set(),
     stats: { kills: 0, delivered: 0, earned: 0 },
     flags: {},
@@ -76,15 +95,14 @@ export function earn(n) { game.credits += n; game.stats.earned += n; }
 export function buyResearch(id) {
   const r = RESEARCH.find(r => r.id === id);
   if (!r || game.research.has(id)) return;
-  if (r.req && !game.research.has(r.req)) { toast('Requires ' + RESEARCH.find(x => x.id === r.req).name, 'bad'); return; }
   if (!spend(r.cost)) return;
   game.research.add(id);
   r.apply();
-  toast(`Research complete: ${r.name}`, 'good');
+  toast(`Research complete: ${RESOURCES[r.res].name} can now be quarried`, 'good');
   emit('sfx', 'tier');
 }
 
-export function deliver(res) { game.flow[res] += 1; game.stats.delivered++; }
+export function deliver(res, amount = 1) { game.flow[res] += amount; game.stats.delivered++; }
 export function rate(res) { return game.flow[res] / FLOW_TAU * 60; }
 
 export function updateEconomy(dt) {

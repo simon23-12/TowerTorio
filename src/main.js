@@ -49,6 +49,7 @@ const ui = new UI({
   toggleSpeed,
   toggleMute,
   toggleSplit,
+  nextTrack: () => audio.nextSong(),
   pause: p => setPause(p),
   modalOpen: open => { modal = open; },
 });
@@ -119,12 +120,14 @@ function startGame(save) {
   factory = new Factory();
   if (save) {
     Object.assign(game, save.game, { research: new Set(save.game.research), discovered: new Set(save.game.discovered), view: 'defense' });
+    game.upgrades = { miner: 0, refinery: 0, belt: game.beltTier || 0, teleporter: 0, ...save.game.upgrades };
     defense.load(save.defense);
     factory.load(save.factory);
     split = !!save.split;
   }
   mode = 'playing';
   modal = false;
+  ui.hideSectorCleared();
   ui.objIdx = -1;
   layout();
   ui.setView('defense', split);
@@ -149,11 +152,13 @@ function toMenu() {
   ui.closeModals();
   $('hud').classList.add('hidden');
   $('gameover').classList.add('hidden');
+  ui.hideSectorCleared();
   $('menu').classList.remove('hidden');
   refreshContinue();
   audio.playTrack('menu', 0.6);
 }
 
+on('openModal', id => ui.openModal(id));
 on('victory', () => {
   game.over = true;
   clearSave();
@@ -248,8 +253,9 @@ addEventListener('keydown', e => {
   if (mode !== 'playing') return;
   if (e.code === 'Tab') { e.preventDefault(); if (!game.paused) setView(game.view === 'defense' ? 'factory' : 'defense'); return; }
   if (e.code === 'Escape' || e.code === 'KeyP') {
-    const anyModal = ['howto', 'codex', 'research', 'credits-modal'].some(id => !$(id).classList.contains('hidden'));
+    const anyModal = ['howto', 'codex', 'research', 'upgrades', 'credits-modal'].some(id => !$(id).classList.contains('hidden'));
     if (anyModal) { ui.closeModals(); return; }
+    if (!$('sector-clear').classList.contains('hidden')) { ui.hideSectorCleared(); return; }
     if (e.code === 'Escape' && game.view === 'factory' && (factory.tool || factory.selected)) { factory.onKey('Escape'); return; }
     if (e.code === 'Escape' && game.view === 'defense' && defense.selected) { defense.onKey('Escape'); return; }
     setPause(!game.paused);
@@ -260,7 +266,8 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyF') { toggleSpeed(); return; }
   if (e.code === 'KeyV') { toggleSplit(); return; }
   if (e.code === 'KeyK') { ui.openModal('codex'); return; }
-  if (e.code === 'KeyU') { ui.openModal('research'); return; }
+  if (e.code === 'KeyU') { ui.openModal('upgrades'); return; }
+  if (e.code === 'KeyY') { ui.openModal('research'); return; }
   const v = focused();
   v.keys.add(e.code);
   v.onKey(e.code);

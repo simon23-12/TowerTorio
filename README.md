@@ -9,7 +9,7 @@ A browser game crossover of **tower defense** and **Factorio-style automation**,
 - **The Factory** – a separate map. Quarry endless ore, refine it, and belt the crystals into a teleporter, which beams them to your towers. Extra teleporters can be bought.
 - Each resource powers one stat: Alcamanium → Attack, Vitrium → HP, Quicksilite → Dexterity, Voltarite → Energy (fire rate, extra weapons, special attacks).
 - Stat tiers depend on the **steady delivery rate** (crystals/min), so the factory has to keep running.
-- Credits buy machines, Mk2/Mk3 machine upgrades and research.
+- Credits buy machines, **Upgrades** (Mk2/Mk3 for every building of a type at once, shown as visual cards) and **Research** (unlocks new elements to quarry).
 
 ## Controls
 | | |
@@ -17,7 +17,7 @@ A browser game crossover of **tower defense** and **Factorio-style automation**,
 | `Tab` | switch Corridor / Factory (in split view: switch focus) |
 | `V` | split view – both maps side by side |
 | Corridor | click inside the lit front sector = build tower, drag / `WASD` pan, `T` rotate view 90°, wheel zoom, `1` `2` `3` specials, `N` call wave early |
-| Factory | `1` belt, `2` drill, `3` refinery, `4` teleporter, `R` rotate building, `T` rotate view 90°, right-click remove, `Q` deselect, `WASD` pan, `U` research |
+| Factory | `1` belt, `2` drill, `3` refinery, `4` teleporter, `R` rotate building, `T` rotate view 90°, right-click remove, `Q` deselect, `WASD` pan, `U` upgrades, `Y` research |
 | Global | `P` pause, `F` speed, `M` mute, `K` codex |
 
 Hover any building or tower for its stats. The game autosaves; **Continue** on the main menu resumes.

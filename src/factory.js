@@ -1,6 +1,6 @@
 // The factory map: Factorio-style grid with drills, belts, refineries and a teleporter.
 import * as THREE from 'three';
-import { game, emit, toast, spend, earn, deliver, rate, RESOURCES, RES_KEYS, MK_MULT, BELT_SPEEDS, STAT_INFO } from './state.js';
+import { game, emit, toast, spend, earn, deliver, rate, RESOURCES, RES_KEYS, MK_MULT, BELT_SPEEDS, STAT_INFO, TELE_MULT } from './state.js';
 import { beltTexture, groundTexture } from './textures.js';
 
 export const N = 64;
@@ -10,11 +10,13 @@ const MAX_ITEMS = 4000;
 
 export const BUILD = {
   belt:     { name: 'Conveyor Belt', cost: 1,  key: '1', icon: '▤', desc: 'Moves items forward. Click-drag to lay a line.' },
-  miner:    { name: 'Quarry Drill',  cost: 15, key: '2', icon: '⛏', desc: 'Place on ore. Quarries endlessly and outputs forward.', upg: [40, 120], base: 30 },
-  refinery: { name: 'Refinery',      cost: 25, key: '3', icon: '⚗', desc: '2 ore → 1 crystal. Accepts from any side, outputs forward.', upg: [60, 160], base: 30 },
+  miner:    { name: 'Quarry Drill',  cost: 15, key: '2', icon: '⛏', desc: 'Place on ore. Quarries endlessly and outputs forward.', upg: true, base: 30 },
+  refinery: { name: 'Refinery',      cost: 25, key: '3', icon: '⚗', desc: '2 ore → 1 crystal. Accepts from any side, outputs forward.', upg: true, base: 30 },
   teleporter: { name: 'Teleporter',  cost: 150, key: '4', icon: '◎', size: 2, desc: '2×2. Beams crystals to your towers. Accepts from any side. Each extra one costs more.' },
 };
 const sizeOf = type => BUILD[type]?.size || 1;
+const lvl = type => game.upgrades?.[type] || 0; // type-wide upgrade level, 0 = Mk1
+const RAIL_COLORS = [0xc8a030, 0x40e0ff, 0xff5060];
 const MK_COLORS = [0x8090a0, 0x40e0ff, 0xffc040];
 
 const resColor = RES_KEYS.map(k => new THREE.Color(RESOURCES[k].color));
@@ -260,6 +262,8 @@ export class Factory {
     if (type === 'teleporter') { b.pulse = 0; b.received = 0; }
     b.mesh = this._buildMesh(b);
     this.scene.add(b.mesh);
+    if (b.parts.band) b.parts.band.material = mkMats[lvl(type)];
+    b.mesh.scale.setScalar(1 + lvl(type) * 0.04);
     const size = sizeOf(type);
     for (let j = 0; j < size; j++) for (let i = 0; i < size; i++) this.grid[(y + j) * N + x + i] = b;
     this.buildings.push(b);
@@ -304,7 +308,7 @@ export class Factory {
     this.scene.remove(b.mesh);
     for (let i = 0; i < N * N; i++) if (this.grid[i] === b) this.grid[i] = null;
     this.buildings.splice(this.buildings.indexOf(b), 1);
-    // half of everything spent on it (build + upgrades); belts refund 0.5 ◈ each
+    // half of its build price; belts refund 0.5 ◈ each
     const refund = b.spent * 0.5;
     game.credits += refund;
     if (this.selected === b) this.selected = null;
@@ -317,18 +321,17 @@ export class Factory {
     b.mesh.rotation.y = -dir * Math.PI / 2;
   }
 
-  upgrade(b) {
-    const def = BUILD[b.type];
-    if (!def.upg || b.mk >= 3) return;
-    if (b.mk === 2 && !game.research.has('mk3')) { toast('Research Mk3 Engineering first', 'bad'); emit('sfx', 'error'); return; }
-    const cost = def.upg[b.mk - 1];
-    if (!spend(cost)) return;
-    b.spent += cost;
-    b.mk++;
-    b.parts.band.material = mkMats[b.mk - 1];
-    b.mesh.scale.setScalar(1 + (b.mk - 1) * 0.04);
-    emit('sfx', 'build');
-    toast(`${def.name} upgraded to Mk${b.mk}`, 'good');
+  // re-skin buildings after a type-wide upgrade
+  _applyLevels() {
+    const key = JSON.stringify(game.upgrades);
+    if (key === this._lvlKey) return;
+    this._lvlKey = key;
+    M.rail.color.setHex(RAIL_COLORS[lvl('belt')]);
+    for (const b of this.buildings) {
+      const l = lvl(b.type);
+      if (b.parts.band) b.parts.band.material = mkMats[l];
+      b.mesh.scale.setScalar(1 + l * 0.04);
+    }
   }
 
   // ----- item transfer -----
@@ -353,7 +356,7 @@ export class Factory {
     }
     if (b.type === 'teleporter') {
       if (!(kind & 1)) { this._warn('teleOre', 'The Teleporter only accepts refined crystals — route ore through a Refinery first'); return false; }
-      deliver(res);
+      deliver(res, TELE_MULT[lvl('teleporter')]);
       b.received++;
       b.pulse = 1;
       game.flags.delivered = true;
@@ -380,6 +383,7 @@ export class Factory {
   // ----- simulation -----
   update(dt) {
     this.time += dt;
+    this._applyLevels();
     const v = BELT_SPEEDS[game.beltTier];
     beltTex.offset.x -= v * dt;
     for (const b of this.buildings) {
@@ -393,7 +397,7 @@ export class Factory {
         if (f && f.p >= 1 && this._push(b, f.kind)) its.pop();
       } else if (b.type === 'miner') {
         if (b.out < 0) {
-          b.timer += dt * MK_MULT[b.mk - 1] * BUILD.miner.base / 60;
+          b.timer += dt * MK_MULT[lvl(b.type)] * BUILD.miner.base / 60;
           if (b.timer >= 1) { b.timer -= 1; b.out = b.res * 2; }
           b.status = 'Quarrying';
         }
@@ -401,7 +405,7 @@ export class Factory {
           if (this._push(b, b.out)) b.out = -1;
           else b.status = 'Output blocked';
         }
-        if (b.status === 'Quarrying') b.parts.drill.rotation.y += dt * 6 * MK_MULT[b.mk - 1];
+        if (b.status === 'Quarrying') b.parts.drill.rotation.y += dt * 6 * MK_MULT[lvl(b.type)];
       } else if (b.type === 'refinery') {
         if (b.work < 0 && b.inCount >= 2 && (b.outCount === 0 || b.outKind === b.inKind + 1) && b.outCount < 3) {
           b.work = b.inKind + 1;
@@ -410,7 +414,7 @@ export class Factory {
           b.prog = 0;
         }
         if (b.work >= 0) {
-          b.prog += dt * MK_MULT[b.mk - 1] * BUILD.refinery.base / 60;
+          b.prog += dt * MK_MULT[lvl(b.type)] * BUILD.refinery.base / 60;
           b.status = 'Refining';
           if (b.prog >= 1) { b.outCount++; b.outKind = b.work; b.work = -1; game.flags.refined = true; }
         } else b.status = b.outCount >= 3 ? 'Output blocked' : 'Waiting for ore';
@@ -619,6 +623,7 @@ export class Factory {
       return {
         title: 'Teleporter',
         lines: [
+          ['Level', `Mk${lvl('teleporter') + 1} · ×${TELE_MULT[lvl('teleporter')]} per crystal`],
           ['Crystals sent', `${b.received}`],
           ...RES_KEYS.map(k => [`Total ${STAT_INFO[RESOURCES[k].stat].name}`, `${rate(k).toFixed(1)} /min`]),
         ],
@@ -626,20 +631,19 @@ export class Factory {
       };
     }
     const lines = [];
-    const mult = MK_MULT[b.mk - 1];
+    const mult = MK_MULT[lvl(b.type)];
     if (b.type === 'belt') {
       lines.push(['Speed', `${BELT_SPEEDS[game.beltTier].toFixed(1)} tiles/s`], ['Items', `${b.items.length}`]);
     } else {
-      lines.push(['Level', `Mk${b.mk}`], ['Status', b.status]);
+      lines.push(['Level', `Mk${lvl(b.type) + 1} (all ${def.name}s)`], ['Status', b.status]);
       if (b.type === 'miner') lines.push(['Mining', RESOURCES[RES_KEYS[b.res]].name], ['Output', `${(def.base * mult).toFixed(0)} ore/min`]);
       if (b.type === 'refinery') {
         lines.push(['Output', `up to ${(def.base * mult).toFixed(0)} crystals/min`]);
         lines.push(['Input', b.inKind >= 0 ? `${b.inCount}× ${itemName(b.inKind)}` : 'empty']);
       }
     }
-    if (def.upg && b.mk < 3) lines.push(['Next upgrade', `${def.upg[b.mk - 1]} ◈`]);
     lines.push(['Refund if removed', `${+(b.spent * 0.5).toFixed(1)} ◈`]);
-    return { title: `${def.name}${def.upg ? ' Mk' + b.mk : ''}`, lines, note: def.desc };
+    return { title: `${def.name} Mk${lvl(b.type) + 1}`, lines, note: def.desc };
   }
 
   getHoverInfo() {
@@ -659,10 +663,7 @@ export class Factory {
     const info = this._info(b);
     const def = BUILD[b.type];
     const buttons = [];
-    if (def.upg && b.mk < 3) {
-      const locked = b.mk === 2 && !game.research.has('mk3');
-      buttons.push({ label: locked ? `Mk3 needs research` : `Upgrade → Mk${b.mk + 1} (${def.upg[b.mk - 1]} ◈)`, action: 'upgrade', disabled: locked || game.credits < def.upg[b.mk - 1] });
-    }
+    buttons.push({ label: `Upgrade all ${def.name}s… (U)`, action: 'upgrades' });
     if (b.type !== 'teleporter') buttons.push({ label: 'Rotate (R)', action: 'rotate' });
     if (!b.fixed) buttons.push({ label: `Remove (+${+(b.spent * 0.5).toFixed(1)} ◈ refund)`, action: 'remove' });
     buttons.push({ label: 'Close', action: 'close' });
@@ -673,7 +674,7 @@ export class Factory {
   serialize() {
     return {
       cam: [this.cx, this.cz, this.dist, this.yaw],
-      buildings: this.buildings.map(b => [b.type, b.x, b.y, b.dir, b.mk, b.spent, b.fixed ? 1 : 0]),
+      buildings: this.buildings.map(b => [b.type, b.x, b.y, b.dir, 1, b.spent, b.fixed ? 1 : 0]),
     };
   }
   load(d) {
@@ -683,9 +684,7 @@ export class Factory {
     for (const [type, x, y, dir, mk, spent, fixed] of d.buildings) {
       const b = this._place(type, x, y, dir);
       b.spent = spent;
-      b.mk = mk;
       if (fixed) { b.fixed = true; this.teleporter = b; }
-      if (mk > 1 && b.parts.band) { b.parts.band.material = mkMats[mk - 1]; b.mesh.scale.setScalar(1 + (mk - 1) * 0.04); }
     }
     [this.cx, this.cz, this.dist, this.yaw] = d.cam;
     this.yawCur = this.yaw;
@@ -695,7 +694,7 @@ export class Factory {
     const b = this.selected;
     if (!b) return;
     if (a === 'close') this.selected = null;
-    if (a === 'upgrade') this.upgrade(b);
+    if (a === 'upgrades') emit('openModal', 'upgrades');
     if (a === 'rotate') this.setDir(b, (b.dir + 1) % 4);
     if (a === 'remove') this.remove(b);
   }

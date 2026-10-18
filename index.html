@@ -36,6 +36,7 @@
         <kbd class="tabkey">Tab</kbd>
       </div>
       <div class="tb-group">
+        <div class="chip np" title="Now playing"><span class="np-note">♪</span><span id="np-title">—</span><button id="btn-next-track" title="Next track">⏭</button></div>
         <button id="btn-codex" class="btn small" title="Enemy codex">Codex <kbd>K</kbd></button>
         <button id="btn-speed" class="btn small" title="Game speed (F)">×1</button>
         <button id="btn-pause" class="btn small" title="Pause (P / Esc)">❚❚</button>
@@ -112,10 +113,10 @@
           <p>A separate map. Press <kbd>Tab</kbd> to switch. Place <b>Quarry Drills</b> on ore, belt the ore into <b>Refineries</b>, then belt the crystals into a <b>Teleporter</b>. You can buy more teleporters. <kbd>V</kbd> shows both maps side by side.</p>
           <p>Each resource powers one stat: <span class="c-a">Alcamanium → Attack</span>, <span class="c-h">Vitrium → HP</span>, <span class="c-d">Quicksilite → Dexterity</span>, <span class="c-e">Voltarite → Energy</span>.</p>
           <p>Tiers depend on the <b>steady flow</b> (crystals/min). Ore never runs out — but if supply drops, so does your tower.</p>
-          <p>Spend credits on new machines, upgrades and research.</p>
+          <p>Spend credits on new machines, <b>Upgrades</b> (every building of a type at once) and <b>Research</b> (new elements).</p>
         </div>
       </div>
-      <p class="keys"><kbd>Tab</kbd> switch map · <kbd>P</kbd> pause · <kbd>F</kbd> speed · <kbd>M</kbd> mute · <kbd>K</kbd> codex · <kbd>U</kbd> research · <kbd>T</kbd> rotate view · <kbd>V</kbd> split view · <kbd>1</kbd>–<kbd>4</kbd> tools / specials</p>
+      <p class="keys"><kbd>Tab</kbd> switch map · <kbd>P</kbd> pause · <kbd>F</kbd> speed · <kbd>M</kbd> mute · <kbd>K</kbd> codex · <kbd>U</kbd> upgrades · <kbd>Y</kbd> research · <kbd>T</kbd> rotate view · <kbd>V</kbd> split view · <kbd>1</kbd>–<kbd>4</kbd> tools / specials</p>
       <button class="btn" data-close>Got it</button>
     </div>
   </div>
@@ -129,11 +130,22 @@
     </div>
   </div>
 
+  <div id="sector-clear" class="hidden"></div>
+
+  <div id="upgrades" class="overlay modal hidden">
+    <div class="modal-box">
+      <h2>Upgrades</h2>
+      <p class="sub">Each upgrade improves <b>every</b> building of that type — the ones you have and the ones you build later.</p>
+      <div id="upgrades-list" class="upg-grid"></div>
+      <button class="btn" data-close>Close</button>
+    </div>
+  </div>
+
   <div id="research" class="overlay modal hidden">
     <div class="modal-box">
       <h2>Research</h2>
-      <p class="sub">Spend credits earned in the corridor to expand your factory.</p>
-      <div id="research-list" class="grid"></div>
+      <p class="sub">Unlock new elements to quarry. Each one powers a different tower stat.</p>
+      <div id="research-list" class="upg-grid"></div>
       <button class="btn" data-close>Close</button>
     </div>
   </div>

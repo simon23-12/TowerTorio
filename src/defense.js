@@ -509,14 +509,32 @@ export class Defense {
     const s = this.cleared;
     this.cleared++;
     this.refreshSectors();
+    this._clearFx(s);
     if (this.cleared >= SECTORS) { toast('The corridor is secured!', 'good'); emit('victory'); return; }
     // bounty, topped up so the next tower is always affordable (no income while waves are halted)
     let bounty = 25 + 10 * s;
     const short = this.towerCost(this.cleared) - (game.credits + bounty);
     if (short > 0) bounty += short;
     earn(bounty);
-    toast(`Sector ${s + 1} cleared! +${bounty} ◈. No more enemies until you build a tower in Sector ${s + 2}.`, 'good');
+    emit('sectorCleared', { sector: s, bounty, nextCost: this.towerCost(this.cleared), last: false });
     emit('sfx', 'tier');
+  }
+
+  // light sweeps up the corridor from the cleared sector through the newly lit one
+  _clearFx(s) {
+    const cx = s * SL + SL / 2;
+    this._ring(cx, 0, 0x60e0ff, 14, 1.4);
+    this._ring(cx, 0, 0xffffff, 8, 0.9);
+    for (let i = 0; i < 8; i++) this._burst(s * SL + Math.random() * SL, 1, (Math.random() - 0.5) * CORRIDOR_W * 0.8, i % 2 ? 0xffd046 : 0x60e0ff, 14, 7);
+    if (!this.sweepMesh) {
+      this.sweepMesh = new THREE.Mesh(new THREE.BoxGeometry(1.2, 7, CORRIDOR_W),
+        basic(0x80e8ff, { transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
+      this.sweepMesh.position.y = 3.5;
+      this.sweepMesh.renderOrder = 6;
+      this.scene.add(this.sweepMesh);
+    }
+    this.sweep = { t: 0, x0: s * SL, x1: Math.min(L, (s + 2) * SL) };
+    this.shake = 0.35;
   }
 
   _damageTower(t, dmg) {
@@ -759,6 +777,13 @@ export class Defense {
     u.uVision.value[0].set(-3, 0, 9);
     u.uCount.value = 1;
 
+    if (this.sweep) {
+      const sw = this.sweep;
+      sw.t += dt / 1.8;
+      this.sweepMesh.position.x = sw.x0 + (sw.x1 - sw.x0) * sw.t;
+      this.sweepMesh.material.opacity = Math.sin(Math.PI * Math.min(1, sw.t)) * 0.55;
+      if (sw.t >= 1) { this.sweep = null; this.sweepMesh.material.opacity = 0; }
+    }
     this.coreCrystal.rotation.y += dt;
     this.coreCrystal.position.y = 2.4 + Math.sin(this.time * 1.5) * 0.2;
     this.coreRing.rotation.z -= dt * 0.5;

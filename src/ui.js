@@ -1,5 +1,6 @@
 // DOM HUD: stats, objectives, panels, toasts, codex, research.
-import { game, on, rate, buyResearch, RESOURCES, RES_KEYS, STAT_INFO, TIERS, RESEARCH } from './state.js';
+import { game, on, rate, buyResearch, buyUpgrade, RESOURCES, RES_KEYS, STAT_INFO, TIERS, RESEARCH, UPGRADES } from './state.js';
+import { buildingIcon, oreIcon } from './icons.js';
 import { ENEMY_TYPES, SPECIALS } from './defense.js';
 import { BUILD } from './factory.js';
 
@@ -12,7 +13,7 @@ const OBJECTIVES = [
   { text: 'Place a <b>Refinery</b> (<kbd>3</kbd>) and connect the drill\'s arrow side to it with <b>belts</b> (<kbd>1</kbd>, click-drag).', done: () => game.flags.refined },
   { text: 'Belt the glowing crystals into the <b>Teleporter</b> in the center.', done: () => game.flags.delivered },
   { text: 'Reach <span class="c-a">Attack Tier 1</span>: a steady 6 crystals/min.', done: () => game.tier.alcamanium >= 1 },
-  { text: 'Earn credits and research <span class="c-h">Vitrium Refining</span> (<kbd>U</kbd>) for tower HP.', done: () => game.unlocked.vitrium },
+  { text: 'Earn credits and research <span class="c-h">Vitrium</span> (<kbd>Y</kbd>) for tower HP.', done: () => game.unlocked.vitrium },
   { text: 'Clear sector after sector with towers and push all four stats. Survive!', done: () => false },
 ];
 
@@ -24,7 +25,22 @@ export class UI {
     this.slow = 0;
     on('toast', t => this.toast(t.text, t.kind));
     on('discover', () => this.renderCodex());
-    on('song', song => this.toast(`♪ Now playing: <b>${song.title}</b> — ${song.artist}`, 'info'));
+    on('song', song => { $('np-title').textContent = `${song.title} — ${song.artist}`; $('np-title').title = `Now playing: ${song.title} by ${song.artist}`; });
+    on('sectorCleared', info => this.showSectorCleared(info));
+    $('btn-next-track').onclick = () => handlers.nextTrack();
+    $('upgrades-list').addEventListener('click', ev => {
+      const a = ev.target.closest('[data-upgrade]');
+      if (a) { buyUpgrade(a.dataset.upgrade); this.renderUpgrades(); }
+    });
+    $('sector-clear').addEventListener('click', ev => {
+      const a = ev.target.closest('[data-sc]');
+      if (!a) return;
+      const act = a.dataset.sc;
+      this.hideSectorCleared();
+      if (act === 'goto') { handlers.setView('defense'); handlers.defense().focusSector(handlers.defense().cleared); }
+      if (act === 'upgrades' || act === 'research') this.openModal(act);
+      if (act === 'factory') handlers.setView('factory');
+    });
 
     $('tab-defense').onclick = () => handlers.setView('defense');
     $('tab-factory').onclick = () => handlers.setView('factory');
@@ -55,7 +71,7 @@ export class UI {
     $('hotbar').addEventListener('click', ev => {
       const t = ev.target.closest('[data-tool]');
       if (!t) return;
-      if (t.dataset.tool === 'research') this.openModal('research');
+      if (t.dataset.tool === 'research' || t.dataset.tool === 'upgrades') this.openModal(t.dataset.tool);
       else handlers.factory().setTool(t.dataset.tool);
     });
     this._buildStatic();
@@ -75,7 +91,8 @@ export class UI {
       SPECIALS.map(s => `<button class="btn small special" data-special="${s.id}" title="${s.desc}"><kbd>${s.key}</kbd> ${s.name}<small></small></button>`).join('');
     $('hotbar').innerHTML = Object.entries(BUILD).map(([id, b]) =>
       `<button class="btn tool" data-tool="${id}" title="${b.desc}"><kbd>${b.key}</kbd> <span class="ic">${b.icon}</span>${b.name}<small>${b.cost} ◈</small></button>`).join('') +
-      `<button class="btn tool ghost" data-tool="research" title="Research upgrades"><kbd>U</kbd> <span class="ic">⚛</span>Research<small>unlocks</small></button>`;
+      `<button class="btn tool ghost" data-tool="upgrades" title="Upgrade every building of a type"><kbd>U</kbd> <span class="ic">⇪</span>Upgrades<small>machines</small></button>` +
+      `<button class="btn tool ghost" data-tool="research" title="Unlock new elements to quarry"><kbd>Y</kbd> <span class="ic">⚛</span>Research<small>elements</small></button>`;
     this.renderCodex();
     this.renderResearch();
   }
@@ -94,11 +111,12 @@ export class UI {
     this.closeModals(false);
     if (id === 'codex') this.renderCodex();
     if (id === 'research') this.renderResearch();
+    if (id === 'upgrades') this.renderUpgrades();
     $(id).classList.remove('hidden');
     this.h.modalOpen(true);
   }
   closeModals(notify = true) {
-    for (const id of ['howto', 'codex', 'research', 'pausemenu', 'credits-modal']) $(id).classList.add('hidden');
+    for (const id of ['howto', 'codex', 'research', 'upgrades', 'pausemenu', 'credits-modal']) $(id).classList.add('hidden');
     if (notify) this.h.modalOpen(false);
   }
 
@@ -112,12 +130,69 @@ export class UI {
 
   renderResearch() {
     $('research-list').innerHTML = RESEARCH.map(r => {
-      const done = game.research.has(r.id);
-      const reqOk = !r.req || game.research.has(r.req);
-      return `<div class="entry ${done ? 'done' : ''}"><h5>${r.name}</h5><div>${r.desc}</div>
-        ${done ? '<div class="meta" style="color:var(--good)">✓ Researched</div>' :
-          `<button class="btn small" data-research="${r.id}" ${!reqOk || game.credits < r.cost ? 'disabled' : ''}>${reqOk ? `Research · ${r.cost} ◈` : 'Requires ' + RESEARCH.find(x => x.id === r.req).name}</button>`}</div>`;
+      const R = RESOURCES[r.res], st = STAT_INFO[R.stat], done = game.research.has(r.id);
+      return `<div class="upg-card ${done ? 'done' : ''}">
+        <div class="upg-icon" style="border-color:${R.css}">${oreIcon(R.css)}<span class="mk-badge" style="background:${R.css}">${st.icon}</span></div>
+        <div class="upg-body"><h5 style="color:${R.css}">${R.name}</h5>
+          <div class="upg-stat">Powers <b>${st.name}</b></div>
+          <div class="meta">${r.desc}</div>
+          ${done ? '<div class="upg-done">✓ Unlocked — place drills on it</div>'
+            : `<button class="btn small" data-research="${r.id}" ${game.credits < r.cost ? 'disabled' : ''}>Unlock · ${r.cost} ◈</button>`}</div></div>`;
     }).join('');
+  }
+
+  renderUpgrades() {
+    const f = this.h.factory();
+    const owned = t => f ? f.buildings.filter(b => b.type === t).length : 0;
+    $('upgrades-list').innerHTML = Object.entries(UPGRADES).map(([type, u]) => {
+      const l = game.upgrades[type], max = l >= u.costs.length;
+      const pips = [0, 1, 2].map(i => `<i class="${i <= l ? 'on' : ''}" style="${i <= l ? `background:${['#8090a0', '#40e0ff', '#ffc040'][i]}` : ''}"></i>`).join('');
+      return `<div class="upg-card mk${l}">
+        <div class="upg-icon">${buildingIcon(type, l)}<span class="mk-badge">Mk${l + 1}</span></div>
+        <div class="upg-body"><h5>${u.name}</h5><div class="pips">${pips}</div>
+          <div class="upg-stat">Now: <b>${u.stat(l)}</b></div>
+          ${max ? '<div class="upg-done">✓ Fully upgraded</div>' : `<div class="upg-stat next">Mk${l + 2}: <b>${u.stat(l + 1)}</b></div>`}
+          <div class="meta">You own ${owned(type)} · applies to all, including future ones</div>
+          ${max ? '' : `<button class="btn small" data-upgrade="${type}" ${game.credits < u.costs[l] ? 'disabled' : ''}>Upgrade → Mk${l + 2} · ${u.costs[l]} ◈</button>`}</div></div>`;
+    }).join('');
+  }
+
+  // ----- sector cleared popup -----
+  showSectorCleared({ sector, bounty, nextCost, last }) {
+    const tips = this._suggestions(nextCost);
+    $('sector-clear').innerHTML = `<div class="sc-box">
+      <div class="sc-rays"></div>
+      <div class="sc-kicker">Sector ${sector + 1}</div>
+      <div class="sc-title">CLEARED</div>
+      <div class="sc-bounty">+${bounty} ◈ bounty</div>
+      ${last ? '' : `<div class="sc-next">The corridor is quiet. <b>Build a tower in Sector ${sector + 2}</b> to bring the next wave — it costs <b>${nextCost} ◈</b>. Your current tower shuts down when you do.</div>`}
+      <div class="sc-tips"><h4>Before you advance</h4>${tips.map(t => `<div class="sc-tip"><span>${t.text}</span>${t.act ? `<button class="btn small" data-sc="${t.act}">${t.label}</button>` : ''}</div>`).join('')}</div>
+      <div class="sc-buttons">${last ? '' : `<button class="btn" data-sc="goto">Go to Sector ${sector + 2}</button>`}<button class="btn ghost" data-sc="close">Continue</button></div>
+    </div>`;
+    $('sector-clear').classList.remove('hidden');
+  }
+  hideSectorCleared() { $('sector-clear').classList.add('hidden'); }
+
+  _suggestions(nextCost) {
+    const out = [], spare = game.credits - nextCost;
+    const f = this.h.factory();
+    // weakest unlocked stat
+    const unlocked = RES_KEYS.filter(k => game.unlocked[k]);
+    const weakest = unlocked.sort((a, b) => game.tier[a] - game.tier[b])[0];
+    if (weakest) {
+      const R = RESOURCES[weakest], t = game.tier[weakest];
+      out.push({ text: `<b style="color:${R.css}">${STAT_INFO[R.stat].name}</b> is your weakest stat (T${t}, ${rate(weakest).toFixed(0)}/min). Next tier needs ${TIERS[t + 1]} ${R.name} crystals/min — add drills and refineries.`, act: 'factory', label: 'Factory' });
+    }
+    const up = Object.entries(UPGRADES).filter(([t, u]) => game.upgrades[t] < u.costs.length).sort((a, b) => a[1].costs[game.upgrades[a[0]]] - b[1].costs[game.upgrades[b[0]]])
+      .find(([t]) => t !== 'belt' || (f && f.buildings.some(b => b.type === 'belt')));
+    if (up) {
+      const [t, u] = up, c = u.costs[game.upgrades[t]];
+      out.push({ text: `Upgrade all <b>${u.name}s</b> to Mk${game.upgrades[t] + 2} (${u.stat(game.upgrades[t] + 1)}) for ${c} ◈${spare >= c ? '' : ' — save up for it'}.`, act: 'upgrades', label: 'Upgrades' });
+    }
+    const r = RESEARCH.find(r => !game.research.has(r.id));
+    if (r) out.push({ text: `Research <b style="color:${RESOURCES[r.res].css}">${RESOURCES[r.res].name}</b> (${r.cost} ◈) to start powering <b>${STAT_INFO[RESOURCES[r.res].stat].name}</b>.`, act: 'research', label: 'Research' });
+    out.push({ text: `Credits only come from kills — keep <b>${nextCost} ◈</b> for the next tower, or you can't advance (removing buildings refunds 50%).` });
+    return out.slice(0, 4);
   }
 
   setView(v, split = false) {
