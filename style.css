@@ -185,6 +185,19 @@ body.split::after { content: ''; position: fixed; top: 0; bottom: 0; left: var(-
 .upg-tabs .tab { flex: 0 0 auto; }
 .tc-row { display: flex; gap: 8px; align-items: center; }
 
+/* options */
+.opt-row { display: grid; grid-template-columns: 130px 1fr 44px; gap: 12px; align-items: center; width: 100%; min-width: 340px; padding: 6px 0; }
+.opt-row label { color: var(--dim); }
+.opt-row input[type=range] { accent-color: var(--accent); width: 100%; }
+.opt-row span { font-family: 'Orbitron', sans-serif; font-size: 12px; text-align: right; }
+.chip.credits small { color: var(--dim); font-size: 12px; }
+.locked-up { filter: grayscale(1); opacity: 0.5; }
+.upg-lock { margin-top: auto; color: var(--dim); font-size: 14px; }
+.drag-active [data-drop] { outline: 2px dashed rgba(70,200,255,0.35); outline-offset: 3px; }
+[data-drop].drop-hover { outline: 2px solid var(--accent) !important; box-shadow: 0 0 18px rgba(70,200,255,0.45); }
+[data-drag] { cursor: grab; } .dragging { opacity: 0.4; }
+#rune-inv { min-height: 120px; border: 1px dashed var(--line); border-radius: 10px; padding: 10px; }
+
 /* runes */
 .rune-row { display: flex; flex-wrap: wrap; gap: 12px; margin: 4px 0 10px; }
 .rune-card { width: 170px; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 10px; background: rgba(255,255,255,0.03); border: 2px solid; border-radius: 10px; color: var(--text); font-family: 'Rajdhani', sans-serif; cursor: pointer; transition: transform .12s, box-shadow .12s; }

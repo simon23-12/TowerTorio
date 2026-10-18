@@ -1,6 +1,6 @@
 // DOM HUD: stats, objectives, panels, toasts, codex, research.
 import { game, on, rate, buyResearch, buyUpgrade, buyTowerUpgrade, towerUpCost, RESOURCES, RES_KEYS, STAT_INFO, TIERS, RESEARCH, UPGRADES, TOWER_UPGRADES, TOWER_UP_MAX,
-  RUNES, RUNE_TIER_COLORS, grantRune, equipRune, unequipRune, SPECIAL_UPGRADES, specialUpCost, buySpecialUpgrade, meta } from './state.js';
+  RUNES, RUNE_TIER_COLORS, grantRune, equipRune, unequipRune, SPECIAL_UPGRADES, specialUpCost, buySpecialUpgrade, meta, afford, towerUpLocked } from './state.js';
 import { buildingIcon, oreIcon, towerUpIcon, runeIcon } from './icons.js';
 import { ENEMY_TYPES, SPECIALS } from './defense.js';
 import { BUILD } from './factory.js';
@@ -59,12 +59,7 @@ export class UI {
       if (act === 'factory') handlers.setView('factory');
     });
     // rune screen + first-rune choice
-    $('runes').addEventListener('click', ev => {
-      const sl = ev.target.closest('[data-slot]');
-      if (sl && game.runes.slots[+sl.dataset.slot]) { unequipRune(+sl.dataset.slot); this.renderRunes(); return; }
-      const r = ev.target.closest('[data-rune]');
-      if (r) { equipRune(r.dataset.rune); this.renderRunes(); }
-    });
+    this._initRuneDnD();
     $('rune-start').addEventListener('click', ev => {
       const r = ev.target.closest('[data-runepick]');
       if (!r) return;
@@ -156,7 +151,7 @@ export class UI {
     this.h.modalOpen(true);
   }
   closeModals(notify = true) {
-    for (const id of ['howto', 'codex', 'research', 'upgrades', 'pausemenu', 'credits-modal', 'runes']) $(id).classList.add('hidden');
+    for (const id of ['howto', 'codex', 'research', 'upgrades', 'pausemenu', 'credits-modal', 'runes', 'options']) $(id).classList.add('hidden');
     if (notify) this.h.modalOpen(false);
   }
 
@@ -177,7 +172,7 @@ export class UI {
           <div class="upg-stat">Powers <b>${st.name}</b></div>
           <div class="meta">${r.desc}</div>
           ${done ? '<div class="upg-done">✓ Unlocked — place drills on it</div>'
-            : `<button class="btn small" data-research="${r.id}" ${game.credits < r.cost ? 'disabled' : ''}>Unlock · ${r.cost} ◈</button>`}</div></div>`;
+            : `<button class="btn small" data-research="${r.id}" ${!afford(r.cost) ? 'disabled' : ''}>Unlock · ${r.cost} ◈</button>`}</div></div>`;
     }).join('');
   }
 
@@ -199,20 +194,22 @@ export class UI {
           <div class="upg-stat">Now: <b>${u.stat(l)}</b></div>
           ${max ? '<div class="upg-done">✓ Fully upgraded</div>' : `<div class="upg-stat next">Mk${l + 2}: <b>${u.stat(l + 1)}</b></div>`}
           <div class="meta">You own ${owned(type)} · applies to all, including future ones</div>
-          ${max ? '' : `<button class="btn small" data-upgrade="${type}" ${game.credits < u.costs[l] ? 'disabled' : ''}>Upgrade → Mk${l + 2} · ${u.costs[l]} ◈</button>`}</div></div>`;
+          ${max ? '' : `<button class="btn small" data-upgrade="${type}" ${!afford(u.costs[l]) ? 'disabled' : ''}>Upgrade → Mk${l + 2} · ${u.costs[l]} ◈</button>`}</div></div>`;
     }).join('');
   }
 
   renderTowerUpgrades() {
     $('upgrades-list').innerHTML = Object.entries(TOWER_UPGRADES).map(([id, u]) => {
-      const l = game.towerUp[id], max = l >= TOWER_UP_MAX, cost = towerUpCost(id);
+      const l = game.towerUp[id] || 0, max = l >= TOWER_UP_MAX, cost = towerUpCost(id);
+      if (towerUpLocked(id)) return `<div class="upg-card locked-up"><div class="upg-icon">${towerUpIcon(id, 0)}<span class="mk-badge">🔒</span></div>
+        <div class="upg-body"><h5>${u.name}</h5><div class="upg-stat">Lv 1: ${u.desc(1)}</div><div class="upg-lock">🔒 Unlocks after clearing Stage 1</div></div></div>`;
       const pips = Array.from({ length: TOWER_UP_MAX }, (_, i) => `<i class="${i < l ? 'on' : ''}" style="${i < l ? 'background:#ffd046' : ''}"></i>`).join('');
       return `<div class="upg-card ${l ? 'mk1' : ''} ${max ? 'mk2' : ''}">
         <div class="upg-icon">${towerUpIcon(id, l)}<span class="mk-badge">Lv ${l}</span></div>
         <div class="upg-body"><h5>${u.name}</h5><div class="pips">${pips}</div>
           <div class="upg-stat">Now: <b>${l ? u.desc(l) : 'not installed'}</b></div>
           ${max ? '<div class="upg-done">✓ Maxed out</div>' : `<div class="upg-stat next">Lv ${l + 1}: <b>${u.desc(l + 1)}</b></div>`}
-          ${max ? '' : `<button class="btn small" data-tup="${id}" ${game.credits < cost ? 'disabled' : ''}>Upgrade → Lv ${l + 1} · ${cost} ◈</button>`}</div></div>`;
+          ${max ? '' : `<button class="btn small" data-tup="${id}" ${!afford(cost) ? 'disabled' : ''}>Upgrade → Lv ${l + 1} · ${cost} ◈</button>`}</div></div>`;
     }).join('') + this._specialCards();
   }
 
@@ -227,7 +224,7 @@ export class UI {
           <div class="upg-body"><h5>${u.name}</h5><div class="pips">${pips}</div>
           <div class="upg-stat">Now: <b>${u.desc(l)}</b></div>
           ${max ? '<div class="upg-done">✓ Maxed out</div>' : `<div class="upg-stat next">Lv ${l + 1}: <b>${u.desc(l + 1)}</b></div>
-          <button class="btn small" data-spup="${id}" ${game.credits < cost ? 'disabled' : ''}>Upgrade → Lv ${l + 1} · ${cost} ◈</button>`}</div></div>`;
+          <button class="btn small" data-spup="${id}" ${!afford(cost) ? 'disabled' : ''}>Upgrade → Lv ${l + 1} · ${cost} ◈</button>`}</div></div>`;
       }).join('');
   }
 
@@ -237,14 +234,53 @@ export class UI {
     return `<button class="rune-card" ${attr} style="border-color:${edge}">${runeIcon(id, r.color, edge)}
       <span class="rn" style="color:${r.color}">${r.name}</span><span class="rt" style="color:${edge}">${r.tier}</span><span class="rd">${r.desc}</span></button>`;
   }
+  // drag runes from the spare pile onto a slot, between slots, or back to the pile
+  _initRuneDnD() {
+    const box = $('runes');
+    box.addEventListener('dragstart', ev => {
+      const el = ev.target.closest('[data-drag]');
+      if (!el) return;
+      ev.dataTransfer.setData('text/plain', el.dataset.drag);
+      ev.dataTransfer.effectAllowed = 'move';
+      el.classList.add('dragging');
+      box.classList.add('drag-active');
+    });
+    box.addEventListener('dragend', ev => {
+      ev.target.closest?.('[data-drag]')?.classList.remove('dragging');
+      box.classList.remove('drag-active');
+      box.querySelectorAll('.drop-hover').forEach(e => e.classList.remove('drop-hover'));
+    });
+    box.addEventListener('dragover', ev => {
+      const t = ev.target.closest('[data-drop]');
+      if (!t) return;
+      ev.preventDefault();
+      box.querySelectorAll('.drop-hover').forEach(e => e !== t && e.classList.remove('drop-hover'));
+      t.classList.add('drop-hover');
+    });
+    box.addEventListener('drop', ev => {
+      const t = ev.target.closest('[data-drop]');
+      if (!t) return;
+      ev.preventDefault();
+      const [id, from] = ev.dataTransfer.getData('text/plain').split(':');
+      const slots = game.runes.slots;
+      if (t.dataset.drop === 'inv') { if (from !== 'inv') unequipRune(+from); }
+      else {
+        const to = +t.dataset.drop, displaced = slots[to];
+        equipRune(id, to);
+        if (from !== 'inv' && displaced && displaced !== id) slots[+from] = displaced; // swap between slots
+      }
+      this.renderRunes();
+    });
+  }
+
   renderRunes() {
     const r = game.runes;
     $('rune-slots').innerHTML = r.slots.map((id, i) => id
-      ? `<button class="rune-slot filled" data-slot="${i}" title="Click to remove">${runeIcon(id, RUNES[id].color, RUNE_TIER_COLORS[RUNES[id].tier])}<span>${RUNES[id].name}</span><small>${RUNES[id].desc}</small></button>`
-      : `<div class="rune-slot"><svg viewBox="0 0 100 100"><polygon points="50,4 90,27 90,73 50,96 10,73 10,27" fill="none" stroke="#334" stroke-width="4" stroke-dasharray="8 6"/></svg><span>Empty slot</span></div>`).join('') +
+      ? `<div class="rune-slot filled" data-drop="${i}" data-drag="${id}:${i}" draggable="true" title="Drag back to the spare pile to remove">${runeIcon(id, RUNES[id].color, RUNE_TIER_COLORS[RUNES[id].tier])}<span>${RUNES[id].name}</span><small>${RUNES[id].desc}</small></div>`
+      : `<div class="rune-slot" data-drop="${i}"><svg viewBox="0 0 100 100"><polygon points="50,4 90,27 90,73 50,96 10,73 10,27" fill="none" stroke="#334" stroke-width="4" stroke-dasharray="8 6"/></svg><span>Drop a rune here</span></div>`).join('') +
       (r.slots.length < 3 ? `<div class="rune-slot locked"><svg viewBox="0 0 100 100"><polygon points="50,4 90,27 90,73 50,96 10,73 10,27" fill="#0c0e13" stroke="#223" stroke-width="4"/><text x="50" y="62" font-size="34" text-anchor="middle" fill="#445">🔒</text></svg><span>${r.slots.length < 2 ? 'Unlocks after Sector 4' : 'Unlocks after Stage 1'}</span></div>` : '');
     const inv = r.owned.filter(id => !r.slots.includes(id));
-    $('rune-inv').innerHTML = inv.length ? inv.map(id => this._runeCard(id, `data-rune="${id}"`)).join('') : '<div class="meta">No spare runes. New runes drop when you clear Sectors 2, 4 and 6.</div>';
+    $('rune-inv').innerHTML = inv.length ? inv.map(id => this._runeCard(id, `data-drag="${id}:inv" draggable="true"`)).join('') : '<div class="meta">No spare runes. New runes drop when you clear Sectors 2, 4 and 6. Drag an equipped rune here to remove it.</div>';
   }
   showRuneStart() {
     $('rune-start-list').innerHTML = ['ember', 'stone'].map(id => this._runeCard(id, `data-runepick="${id}"`)).join('');
@@ -265,7 +301,7 @@ export class UI {
       ${last ? '' : `<div class="sc-next">The corridor is quiet. <b>Build a tower in Sector ${sector + 2}</b> to bring the next wave — it costs <b>${nextCost} ◈</b>. Your current tower shuts down when you do.</div>`}
       ${runeHtml}
       <div class="sc-tips"><h4>Before you advance</h4>${tips.map(t => `<div class="sc-tip"><span>${t.text}</span>${t.act ? `<button class="btn small" data-sc="${t.act}">${t.label}</button>` : ''}</div>`).join('')}</div>
-      <div class="sc-buttons ${runes.length ? 'hidden' : ''}">${last ? '' : `<button class="btn" data-sc="goto">Go to Sector ${sector + 2}</button>`}<button class="btn ghost" data-sc="close">Continue</button></div>
+      <div class="sc-buttons ${runes.length ? 'hidden' : ''}"><button class="btn" data-sc="close">Continue</button></div>
     </div>`;
     $('sector-clear').classList.remove('hidden');
   }
@@ -308,6 +344,7 @@ export class UI {
 
   update(defense, factory, { split, hoverView, mouse }) {
     $('credits').textContent = game.credits % 1 ? game.credits.toFixed(1) : game.credits;
+    $('reserve').textContent = game.reserve ? `${game.reserve} reserved` : '';
     $('core').textContent = `${game.coreHP}/${game.coreMax}`;
     $('core-chip').classList.toggle('low', game.coreHP <= 6);
     const inc = defense.incomingInfo();
@@ -408,7 +445,7 @@ export class UI {
         const def = BUILD[b.dataset.tool];
         if (!def) return;
         const cost = factory.costOf(b.dataset.tool);
-        b.disabled = game.credits < cost;
+        b.disabled = !afford(cost);
         const sm = b.querySelector('small');
         if (sm.textContent !== cost + ' ◈') sm.textContent = cost + ' ◈';
       });

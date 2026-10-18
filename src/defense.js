@@ -373,6 +373,7 @@ export class Defense {
     this._buildWorld();
     this._buildFog();
     this._buildGhost();
+    this._buildMarker();
     this.lights = Array.from({ length: SECTORS }, () => {
       const l = new THREE.PointLight(0xffc080, 0, 28, 1.4);
       this.scene.add(l);
@@ -509,6 +510,58 @@ export class Defense {
     this.scene.add(g);
   }
 
+  _buildMarker() {
+    const g = new THREE.Group();
+    const ringMat = basic(0x60e8ff, { transparent: true, opacity: 0.8, depthWrite: false });
+    const ring = new THREE.Mesh(new THREE.RingGeometry(2.6, 3.0, 48), ringMat);
+    ring.rotation.x = -Math.PI / 2; ring.position.y = 0.05;
+    const inner = new THREE.Mesh(new THREE.RingGeometry(1.2, 1.4, 6), ringMat);
+    inner.rotation.x = -Math.PI / 2; inner.position.y = 0.05;
+    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.4, 9, 24, 1, true),
+      basic(0x60e8ff, { transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+    beam.position.y = 4.5;
+    const arrow = mesh(G.cone, basic(0x9ff4ff), 0.5, 0.9, 0.5, 0, 6.8, 0);
+    arrow.rotation.x = Math.PI;
+    this.markerCanvas = document.createElement('canvas');
+    this.markerCanvas.width = 512; this.markerCanvas.height = 160;
+    this.markerTex = new THREE.CanvasTexture(this.markerCanvas);
+    this.markerTex.colorSpace = THREE.SRGBColorSpace;
+    const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.markerTex, depthTest: false, transparent: true }));
+    label.scale.set(8, 2.5, 1); label.position.y = 8.6; label.renderOrder = 20;
+    g.add(ring, inner, beam, arrow, label);
+    g.visible = false;
+    this.marker = { g, ring, inner, arrow, ringMat, key: '' };
+    this.scene.add(g);
+  }
+
+  _updateMarker() {
+    const s = this.cleared, mk = this.marker;
+    const show = !this.attract && this.canBuildSector(s) && !this.waveActive;
+    mk.g.visible = show && !(this.ghost.visible && this.hover?.sector === s);
+    if (!show) return;
+    mk.g.position.set(s * SL + SL / 2, 0, 0);
+    const p = 0.5 + 0.5 * Math.sin(this.time * 3);
+    mk.ring.scale.setScalar(1 + p * 0.08);
+    mk.inner.rotation.z += 0.02;
+    mk.arrow.position.y = 6.6 + p * 0.5;
+    mk.ringMat.opacity = 0.5 + p * 0.4;
+    const cost = this.towerCost(s), rebuild = !!this.rubble[s];
+    const key = `${s}|${cost}|${rebuild}|${game.credits >= cost}`;
+    if (key === mk.key) return;
+    mk.key = key;
+    const c = this.markerCanvas.getContext('2d');
+    c.clearRect(0, 0, 512, 160);
+    c.fillStyle = 'rgba(5,10,20,0.85)';
+    c.beginPath(); c.roundRect(10, 10, 492, 140, 20); c.fill();
+    c.strokeStyle = '#60e8ff'; c.lineWidth = 4; c.stroke();
+    c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.font = 'bold 40px Orbitron, sans-serif'; c.fillStyle = '#e8fbff';
+    c.fillText(rebuild ? 'REBUILD TOWER HERE' : 'PLACE TOWER HERE', 256, 58);
+    c.font = '600 32px Rajdhani, sans-serif'; c.fillStyle = game.credits >= cost ? '#ffd046' : '#ff6060';
+    c.fillText(rebuild ? `${cost} ◈ · keeps the waves coming` : `${cost} ◈ · starts the next wave`, 256, 108);
+    this.markerTex.needsUpdate = true;
+  }
+
   _setGhostLabel(text, ok) {
     const key = text + ok;
     if (key === this.ghostLabel) return;
@@ -564,7 +617,7 @@ export class Defense {
       this._sfx('error');
       return;
     }
-    if (!spend(this.towerCost(s))) return;
+    if (!spend(this.towerCost(s), true)) return;
     const p = this._clampInSector(s, x, z);
     this._placeTower(s, p.x, p.z);
     this._sfx('build');
@@ -646,6 +699,7 @@ export class Defense {
 
   _damageTower(t, dmg) {
     if (!t.alive) return;
+    dmg *= 1 - this.stats().armor;
     if (Math.random() < this.stats().block) {
       this._ring(t.x, t.z, 0x60e0ff, 2.2, 0.3);
       this._sfx('shield');
@@ -928,6 +982,8 @@ export class Defense {
       if (this.hail.left <= 0) this.hail = null;
     }
 
+    this._updateMarker();
+    if (!this.attract) game.reserve = this.canBuildSector(this.cleared) ? this.towerCost(this.cleared) : 0;
     this._updateEnemies(dt);
     this._updateTowers(dt, S);
     this._updateProjectiles(dt);
@@ -1086,6 +1142,16 @@ export class Defense {
           const tgt = a.target;
           if (a.frost) { tgt.slowT = 2.5; this._burst(tgt.x, 1, tgt.z, 0x9fe8ff, 5, 2); this._sfx('frost'); }
           this._damageEnemy(tgt, a.dmg, a.crit);
+          const S = this.stats();
+          if (!tgt.dead && !tgt.T.boss && tgt.hp < tgt.maxHP * 0.25 && Math.random() < S.execute) {
+            this._burst(tgt.x, 1.2, tgt.z, 0xff2040, 12, 5);
+            this._damageEnemy(tgt, tgt.hp + 1);
+          }
+          if (Math.random() < S.splash) {
+            for (const o of this.enemies.slice()) if (o !== tgt && Math.hypot(o.x - tgt.x, o.z - tgt.z) < 2.5) this._damageEnemy(o, a.dmg * 0.5);
+            this._ring(tgt.x, tgt.z, 0xffa040, 2.5, 0.35);
+            this._sfx('boom');
+          }
           if (a.chain) this._chain(tgt, a.dmg * 0.6, a.chain);
         }
         this.scene.remove(a.mesh);

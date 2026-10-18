@@ -15,10 +15,16 @@ export const GAME_MUSIC = [
   { file: 'track10', title: 'Epic Boss Battle', artist: 'Juhani Junkala', license: 'CC0' },
 ];
 
+const SETTINGS_KEY = 'towertorio-audio-v1';
 const ext = document.createElement('audio').canPlayType('audio/ogg; codecs="opus"') ? 'ogg' : 'mp3';
 
 class AudioManager {
   constructor() {
+    // player volume settings (0..1), remembered between visits
+    let st = {};
+    try { st = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}'); } catch (e) { /* ignore */ }
+    this.musicVol = st.musicVol ?? 1;
+    this.sfxVol = st.sfxVol ?? 1;
     const menu = new Audio(`assets/menu.${ext}`);
     menu.loop = true;
     menu.preload = 'auto';
@@ -45,7 +51,7 @@ class AudioManager {
       if (!AC) return;
       this.ctx = new AC();
       this.master = this.ctx.createGain();
-      this.master.gain.value = 0.55;
+      this.master.gain.value = 0.55 * this.sfxVol;
       this.master.connect(this.ctx.destination);
       const len = this.ctx.sampleRate * 0.5;
       this.noise = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
@@ -86,15 +92,22 @@ class AudioManager {
   toggleMute() {
     this.muted = !this.muted;
     for (const t of Object.values(this.tracks)) t.el.muted = this.muted;
-    if (this.master) this.master.gain.value = this.muted ? 0 : 0.55;
+    if (this.master) this.master.gain.value = this.muted ? 0 : 0.55 * this.sfxVol;
     return this.muted;
+  }
+
+  setVolumes({ music = this.musicVol, sfx = this.sfxVol } = {}) {
+    this.musicVol = music;
+    this.sfxVol = sfx;
+    if (this.master && !this.muted) this.master.gain.value = 0.55 * sfx;
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ musicVol: music, sfxVol: sfx })); } catch (e) { /* ignore */ }
   }
 
   update(dt) {
     for (const t of Object.values(this.tracks)) {
-      const v = t.el.volume;
-      if (Math.abs(v - t.target) > 0.005) {
-        try { t.el.volume = Math.max(0, Math.min(1, v + Math.sign(t.target - v) * Math.min(Math.abs(t.target - v), dt * 0.6))); } catch (e) { /* iOS: volume is read-only */ }
+      const v = t.el.volume, target = t.target * this.musicVol;
+      if (Math.abs(v - target) > 0.005) {
+        try { t.el.volume = Math.max(0, Math.min(1, v + Math.sign(target - v) * Math.min(Math.abs(target - v), dt * 0.6))); } catch (e) { /* iOS: volume is read-only */ }
       } else if (t.target === 0 && !t.el.paused) t.el.pause();
     }
   }

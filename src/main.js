@@ -243,6 +243,19 @@ $('btn-howto2').onclick = () => { $('pausemenu').classList.add('hidden'); ui.ope
 $('btn-music').onclick = toggleMute;
 $('credits-list').innerHTML = GAME_MUSIC.map(t => `<div class="line"><span>${t.title}</span><span>${t.artist}</span><span>${t.license}</span></div>`).join('');
 $('btn-credits').onclick = () => ui.openModal('credits-modal');
+// options: music and effect volumes (saved by the audio manager)
+function syncOptions() {
+  $('opt-music').value = Math.round(audio.musicVol * 100); $('opt-music-v').textContent = $('opt-music').value + '%';
+  $('opt-sfx').value = Math.round(audio.sfxVol * 100); $('opt-sfx-v').textContent = $('opt-sfx').value + '%';
+}
+function openOptions() { $('pausemenu').classList.add('hidden'); syncOptions(); ui.openModal('options'); }
+document.querySelectorAll('.btn-open-options').forEach(b => { b.onclick = openOptions; });
+$('btn-options').onclick = openOptions;
+$('opt-music').oninput = () => { audio.setVolumes({ music: $('opt-music').value / 100 }); syncOptions(); };
+$('opt-sfx').oninput = () => { audio.setVolumes({ sfx: $('opt-sfx').value / 100 }); syncOptions(); };
+$('opt-sfx').onchange = () => audio.sfx('laser');
+$('opt-test').onclick = () => { audio.unlock(); audio.sfx('fanfare'); };
+$('opt-next').onclick = () => { if (mode === 'playing') audio.nextSong(); };
 function toggleFullscreen() {
   const d = document;
   if (d.fullscreenElement || d.webkitFullscreenElement) (d.exitFullscreen || d.webkitExitFullscreen).call(d);
@@ -312,7 +325,7 @@ addEventListener('keydown', e => {
   if (!$('rune-start').classList.contains('hidden') || !$('stage-clear').classList.contains('hidden')) { if (e.code === 'Tab') e.preventDefault(); return; }
   if (e.code === 'Tab') { e.preventDefault(); if (!game.paused) setView(game.view === 'defense' ? 'factory' : 'defense'); return; }
   if (e.code === 'Escape' || e.code === 'KeyP') {
-    const anyModal = ['howto', 'codex', 'research', 'upgrades', 'credits-modal', 'runes'].some(id => !$(id).classList.contains('hidden'));
+    const anyModal = ['howto', 'codex', 'research', 'upgrades', 'credits-modal', 'runes', 'options'].some(id => !$(id).classList.contains('hidden'));
     if (anyModal) { ui.closeModals(); return; }
     if (!$('sector-clear').classList.contains('hidden')) { ui.hideSectorCleared(); return; }
     if (e.code === 'Escape' && game.view === 'factory' && (factory.tool || factory.selected)) { factory.onKey('Escape'); return; }
@@ -326,6 +339,7 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyV') { toggleSplit(); return; }
   if (e.code === 'KeyK') { ui.openModal('codex'); return; }
   if (e.code === 'KeyE') { ui.openModal('runes'); return; }
+  if (e.code === 'KeyO') { openOptions(); return; }
   if (e.code === 'KeyU') { ui.upgTab = game.view === 'defense' ? 'tower' : 'factory'; ui.openModal('upgrades'); return; }
   if (e.code === 'KeyY') { ui.openModal('research'); return; }
   const v = focused();

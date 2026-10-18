@@ -63,13 +63,21 @@ export const TOWER_UPGRADES = {
   regen:  { name: 'Nanite Repair',   icon: 'regen',  base: 60,  desc: l => `+${(l * 1.5).toFixed(1)} HP/s repair, ${l * 6}% chance to block a hit` },
   frost:  { name: 'Cryo Rounds',     icon: 'frost',  base: 80,  desc: l => `${l * 9}% chance to slow the target by 50% for 2.5s` },
   bounty: { name: 'Bounty Protocol', icon: 'bounty', base: 100, desc: l => `${l * 8}% chance for double credits on a kill` },
+  // unlocked once Stage 1 has been cleared
+  power:   { name: 'Overcharged Core', icon: 'power',   base: 200, req: 1, desc: l => `+${l * 10}% damage` },
+  splash:  { name: 'Shockwave Lens',   icon: 'splash',  base: 220, req: 1, desc: l => `${l * 8}% chance a hit explodes for 50% damage around the target` },
+  execute: { name: 'Executioner',      icon: 'execute', base: 240, req: 1, desc: l => `${l * 5}% chance to instantly finish an enemy below 25% HP (not bosses)` },
+  plating: { name: 'Fortress Plating', icon: 'plating', base: 200, req: 1, desc: l => `+${l * 15}% max HP, −${l * 4}% damage taken` },
+  barrel:  { name: 'Long Barrel',      icon: 'barrel',  base: 180, req: 1, desc: l => `+${(l * 1.5).toFixed(1)} m reach beyond the sector` },
 };
+export const towerUpLocked = id => (TOWER_UPGRADES[id].req || 0) > meta.stagesCleared;
 export const TOWER_UP_MAX = 5;
-export const towerUpCost = (id, l = game.towerUp[id]) => Math.round(TOWER_UPGRADES[id].base * Math.pow(1.7, l));
+export const towerUpCost = (id, l = game.towerUp[id] || 0) => Math.round(TOWER_UPGRADES[id].base * Math.pow(1.7, l));
 
 export function buyTowerUpgrade(id) {
-  const l = game.towerUp[id];
+  const l = game.towerUp[id] || 0;
   if (l >= TOWER_UP_MAX) return;
+  if (towerUpLocked(id)) { toast('Unlocks after clearing Stage 1', 'bad'); emit('sfx', 'error'); return; }
   if (!spend(towerUpCost(id))) return;
   game.towerUp[id] = l + 1;
   toast(`${TOWER_UPGRADES[id].name} level ${l + 1}: ${TOWER_UPGRADES[id].desc(l + 1)}`, 'good');
@@ -190,11 +198,20 @@ export function on(ev, fn) { (listeners[ev] ||= []).push(fn); }
 export function emit(ev, data) { (listeners[ev] || []).forEach(f => f(data)); }
 export function toast(text, kind = 'info') { emit('toast', { text, kind }); }
 
-export function spend(n) {
-  if (game.credits >= n) { game.credits -= n; return true; }
-  toast(`Not enough credits (need ${n} ◈)`, 'bad');
-  emit('sfx', 'error');
-  return false;
+export const afford = n => game.credits - (game.reserve || 0) >= n;
+export function spend(n, ignoreReserve = false) {
+  if (game.credits < n) {
+    toast(`Not enough credits (need ${n} ◈)`, 'bad');
+    emit('sfx', 'error');
+    return false;
+  }
+  if (!ignoreReserve && !afford(n)) {
+    toast(`${game.reserve} ◈ are reserved for your next Watchtower — build it first`, 'bad');
+    emit('sfx', 'error');
+    return false;
+  }
+  game.credits -= n;
+  return true;
 }
 export function earn(n) { game.credits += n; game.stats.earned += n; }
 
@@ -232,11 +249,14 @@ export function updateEconomy(dt) {
 export function towerStats(t = game.tier, u = game.towerUp, r = runeMods()) {
   const a = t.alcamanium, h = t.vitrium, d = t.quicksilite, e = t.voltarite;
   return {
-    damage: 4 * Math.pow(1.6, a) * (1 + (r.dmg || 0)),
-    maxHP: (100 + 120 * h + 25 * h * h) * (1 + (r.hp || 0)),
+    damage: 4 * Math.pow(1.6, a) * (1 + (r.dmg || 0)) * (1 + 0.1 * (u.power || 0)),
+    maxHP: (100 + 120 * h + 25 * h * h) * (1 + (r.hp || 0)) * (1 + 0.15 * (u.plating || 0)),
+    armor: 0.04 * (u.plating || 0),
+    splash: 0.08 * (u.splash || 0),
+    execute: 0.05 * (u.execute || 0),
     regen: 0.5 + 2.5 * h + 1.5 * u.regen + (r.regen || 0),
     block: Math.min(0.6, 0.06 * u.regen + (r.block || 0)),
-    reach: 1 + 1.5 * d,
+    reach: 1 + 1.5 * d + 1.5 * (u.barrel || 0),
     crit: Math.min(0.75, 0.05 + 0.06 * d + 0.05 * u.crit + (r.crit || 0)),
     critMul: 2 + 0.15 * d + 0.25 * u.crit,
     projSpeed: 20 + 5 * d,

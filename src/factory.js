@@ -1,6 +1,6 @@
 // The factory map: Factorio-style grid with drills, belts, refineries and a teleporter.
 import * as THREE from 'three';
-import { game, emit, toast, spend, earn, deliver, rate, RESOURCES, RES_KEYS, MK_MULT, BELT_SPEEDS, STAT_INFO, TELE_MULT } from './state.js';
+import { game, emit, toast, spend, earn, afford, deliver, rate, RESOURCES, RES_KEYS, MK_MULT, BELT_SPEEDS, STAT_INFO, TELE_MULT } from './state.js';
 import { beltTexture, groundTexture } from './textures.js';
 
 export const N = 64;
@@ -607,7 +607,7 @@ export class Factory {
     this.ghost.scale.set(size, 1, size);
     this.ghostArrow.visible = size === 1;
     this.ghost.rotation.y = size === 1 ? -this.rot * Math.PI / 2 : 0;
-    const ok = this._canPlace(this.tool, h.x, h.y, true) && game.credits >= this.costOf(this.tool);
+    const ok = this._canPlace(this.tool, h.x, h.y, true) && afford(this.costOf(this.tool));
     const c = ok ? 0x40ff80 : 0xff4040;
     this.ghostMat.color.setHex(c);
     this.ghostArrowMat.color.setHex(c);
