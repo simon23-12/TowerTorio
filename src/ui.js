@@ -1,6 +1,6 @@
 // DOM HUD: stats, objectives, panels, toasts, codex, research.
-import { game, on, rate, buyResearch, buyUpgrade, RESOURCES, RES_KEYS, STAT_INFO, TIERS, RESEARCH, UPGRADES } from './state.js';
-import { buildingIcon, oreIcon } from './icons.js';
+import { game, on, rate, buyResearch, buyUpgrade, buyTowerUpgrade, towerUpCost, RESOURCES, RES_KEYS, STAT_INFO, TIERS, RESEARCH, UPGRADES, TOWER_UPGRADES, TOWER_UP_MAX } from './state.js';
+import { buildingIcon, oreIcon, towerUpIcon } from './icons.js';
 import { ENEMY_TYPES, SPECIALS } from './defense.js';
 import { BUILD } from './factory.js';
 
@@ -28,9 +28,16 @@ export class UI {
     on('song', song => { $('np-title').textContent = `${song.title} — ${song.artist}`; $('np-title').title = `Now playing: ${song.title} by ${song.artist}`; });
     on('sectorCleared', info => this.showSectorCleared(info));
     $('btn-next-track').onclick = () => handlers.nextTrack();
+    $('upgrades').addEventListener('click', ev => {
+      const tab = ev.target.closest('[data-utab]');
+      if (tab) { this.upgTab = tab.dataset.utab; this.renderUpgrades(); }
+    });
+    $('btn-tower-upgrades').onclick = () => { this.upgTab = 'tower'; this.openModal('upgrades'); };
     $('upgrades-list').addEventListener('click', ev => {
       const a = ev.target.closest('[data-upgrade]');
       if (a) { buyUpgrade(a.dataset.upgrade); this.renderUpgrades(); }
+      const t = ev.target.closest('[data-tup]');
+      if (t) { buyTowerUpgrade(t.dataset.tup); this.renderUpgrades(); }
     });
     $('sector-clear').addEventListener('click', ev => {
       const a = ev.target.closest('[data-sc]');
@@ -38,6 +45,8 @@ export class UI {
       const act = a.dataset.sc;
       this.hideSectorCleared();
       if (act === 'goto') { handlers.setView('defense'); handlers.defense().focusSector(handlers.defense().cleared); }
+      if (act === 'upgrades') this.upgTab = 'factory';
+      if (act === 'tower') { this.upgTab = 'tower'; this.openModal('upgrades'); }
       if (act === 'upgrades' || act === 'research') this.openModal(act);
       if (act === 'factory') handlers.setView('factory');
     });
@@ -71,6 +80,7 @@ export class UI {
     $('hotbar').addEventListener('click', ev => {
       const t = ev.target.closest('[data-tool]');
       if (!t) return;
+      if (t.dataset.tool === 'upgrades') this.upgTab = 'factory';
       if (t.dataset.tool === 'research' || t.dataset.tool === 'upgrades') this.openModal(t.dataset.tool);
       else handlers.factory().setTool(t.dataset.tool);
     });
@@ -111,7 +121,7 @@ export class UI {
     this.closeModals(false);
     if (id === 'codex') this.renderCodex();
     if (id === 'research') this.renderResearch();
-    if (id === 'upgrades') this.renderUpgrades();
+    if (id === 'upgrades') { this.upgTab ||= game.view === 'defense' ? 'tower' : 'factory'; this.renderUpgrades(); }
     $(id).classList.remove('hidden');
     this.h.modalOpen(true);
   }
@@ -142,6 +152,12 @@ export class UI {
   }
 
   renderUpgrades() {
+    const tab = this.upgTab || 'factory';
+    document.querySelectorAll('[data-utab]').forEach(b => b.classList.toggle('active', b.dataset.utab === tab));
+    $('upgrades-sub').innerHTML = tab === 'tower'
+      ? 'Tower upgrades apply to your active tower and every tower you build later. Most are <b>chances</b> that grow with each level.'
+      : 'Each upgrade improves <b>every</b> building of that type — the ones you have and the ones you build later.';
+    if (tab === 'tower') { this.renderTowerUpgrades(); return; }
     const f = this.h.factory();
     const owned = t => f ? f.buildings.filter(b => b.type === t).length : 0;
     $('upgrades-list').innerHTML = Object.entries(UPGRADES).map(([type, u]) => {
@@ -154,6 +170,19 @@ export class UI {
           ${max ? '<div class="upg-done">✓ Fully upgraded</div>' : `<div class="upg-stat next">Mk${l + 2}: <b>${u.stat(l + 1)}</b></div>`}
           <div class="meta">You own ${owned(type)} · applies to all, including future ones</div>
           ${max ? '' : `<button class="btn small" data-upgrade="${type}" ${game.credits < u.costs[l] ? 'disabled' : ''}>Upgrade → Mk${l + 2} · ${u.costs[l]} ◈</button>`}</div></div>`;
+    }).join('');
+  }
+
+  renderTowerUpgrades() {
+    $('upgrades-list').innerHTML = Object.entries(TOWER_UPGRADES).map(([id, u]) => {
+      const l = game.towerUp[id], max = l >= TOWER_UP_MAX, cost = towerUpCost(id);
+      const pips = Array.from({ length: TOWER_UP_MAX }, (_, i) => `<i class="${i < l ? 'on' : ''}" style="${i < l ? 'background:#ffd046' : ''}"></i>`).join('');
+      return `<div class="upg-card ${l ? 'mk1' : ''} ${max ? 'mk2' : ''}">
+        <div class="upg-icon">${towerUpIcon(id, l)}<span class="mk-badge">Lv ${l}</span></div>
+        <div class="upg-body"><h5>${u.name}</h5><div class="pips">${pips}</div>
+          <div class="upg-stat">Now: <b>${l ? u.desc(l) : 'not installed'}</b></div>
+          ${max ? '<div class="upg-done">✓ Maxed out</div>' : `<div class="upg-stat next">Lv ${l + 1}: <b>${u.desc(l + 1)}</b></div>`}
+          ${max ? '' : `<button class="btn small" data-tup="${id}" ${game.credits < cost ? 'disabled' : ''}>Upgrade → Lv ${l + 1} · ${cost} ◈</button>`}</div></div>`;
     }).join('');
   }
 
@@ -189,10 +218,12 @@ export class UI {
       const [t, u] = up, c = u.costs[game.upgrades[t]];
       out.push({ text: `Upgrade all <b>${u.name}s</b> to Mk${game.upgrades[t] + 2} (${u.stat(game.upgrades[t] + 1)}) for ${c} ◈${spare >= c ? '' : ' — save up for it'}.`, act: 'upgrades', label: 'Upgrades' });
     }
+    const tu = Object.keys(TOWER_UPGRADES).filter(id => game.towerUp[id] < TOWER_UP_MAX).sort((a, b) => towerUpCost(a) - towerUpCost(b))[0];
+    if (tu) out.push({ text: `Tower upgrade: <b>${TOWER_UPGRADES[tu].name}</b> Lv ${game.towerUp[tu] + 1} — ${TOWER_UPGRADES[tu].desc(game.towerUp[tu] + 1)} (${towerUpCost(tu)} ◈).`, act: 'tower', label: 'Tower' });
     const r = RESEARCH.find(r => !game.research.has(r.id));
     if (r) out.push({ text: `Research <b style="color:${RESOURCES[r.res].css}">${RESOURCES[r.res].name}</b> (${r.cost} ◈) to start powering <b>${STAT_INFO[RESOURCES[r.res].stat].name}</b>.`, act: 'research', label: 'Research' });
     out.push({ text: `Credits only come from kills — keep <b>${nextCost} ◈</b> for the next tower, or you can't advance (removing buildings refunds 50%).` });
-    return out.slice(0, 4);
+    return out.slice(0, 5);
   }
 
   setView(v, split = false) {

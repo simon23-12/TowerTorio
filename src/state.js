@@ -49,8 +49,31 @@ export function buyUpgrade(type) {
   game.upgrades[type] = lvl + 1;
   if (type === 'belt') game.beltTier = lvl + 1;
   toast(`${u.name}s upgraded to Mk${lvl + 2}: ${u.stat(lvl + 1)}`, 'good');
-  emit('sfx', 'tier');
+  emit('sfx', 'upgrade');
   emit('upgraded', type);
+}
+
+// Tower upgrades are bought with credits and stack on top of the factory-supplied stats.
+// Most of them are chances that grow a little with every level.
+export const TOWER_UPGRADES = {
+  rapid:  { name: 'Rapid Fire',      icon: 'rapid',  base: 60,  desc: l => `+${l * 12}% fire rate` },
+  twin:   { name: 'Twin Laser',      icon: 'twin',   base: 90,  desc: l => `${l * 12}% chance to fire a second laser at another enemy` },
+  chain:  { name: 'Chain Laser',     icon: 'chain',  base: 110, desc: l => l ? `${l * 10}% chance a hit hops on to ${1 + Math.floor(l / 2)} more enem${l > 1 ? 'ies' : 'y'} (60% damage)` : 'Hits can hop to nearby enemies' },
+  crit:   { name: 'Precision Optics', icon: 'crit',  base: 70,  desc: l => `+${l * 5}% crit chance, +${(l * 0.25).toFixed(2)}× crit damage` },
+  regen:  { name: 'Nanite Repair',   icon: 'regen',  base: 60,  desc: l => `+${(l * 1.5).toFixed(1)} HP/s repair, ${l * 6}% chance to block a hit` },
+  frost:  { name: 'Cryo Rounds',     icon: 'frost',  base: 80,  desc: l => `${l * 9}% chance to slow the target by 50% for 2.5s` },
+  bounty: { name: 'Bounty Protocol', icon: 'bounty', base: 100, desc: l => `${l * 8}% chance for double credits on a kill` },
+};
+export const TOWER_UP_MAX = 5;
+export const towerUpCost = (id, l = game.towerUp[id]) => Math.round(TOWER_UPGRADES[id].base * Math.pow(1.7, l));
+
+export function buyTowerUpgrade(id) {
+  const l = game.towerUp[id];
+  if (l >= TOWER_UP_MAX) return;
+  if (!spend(towerUpCost(id))) return;
+  game.towerUp[id] = l + 1;
+  toast(`${TOWER_UPGRADES[id].name} level ${l + 1}: ${TOWER_UPGRADES[id].desc(l + 1)}`, 'good');
+  emit('sfx', 'upgrade');
 }
 
 export const game = {};
@@ -72,6 +95,7 @@ export function resetGame() {
     research: new Set(),
     beltTier: 0,
     upgrades: { miner: 0, refinery: 0, belt: 0, teleporter: 0 },
+    towerUp: Object.fromEntries(Object.keys(TOWER_UPGRADES).map(k => [k, 0])),
     discovered: new Set(),
     stats: { kills: 0, delivered: 0, earned: 0 },
     flags: {},
@@ -99,7 +123,7 @@ export function buyResearch(id) {
   game.research.add(id);
   r.apply();
   toast(`Research complete: ${RESOURCES[r.res].name} can now be quarried`, 'good');
-  emit('sfx', 'tier');
+  emit('sfx', 'upgrade');
 }
 
 export function deliver(res, amount = 1) { game.flow[res] += amount; game.stats.delivered++; }
@@ -123,17 +147,23 @@ export function updateEconomy(dt) {
   }
 }
 
-export function towerStats(t = game.tier) {
+export function towerStats(t = game.tier, u = game.towerUp) {
   const a = t.alcamanium, h = t.vitrium, d = t.quicksilite, e = t.voltarite;
   return {
     damage: 4 * Math.pow(1.6, a),
     maxHP: 100 + 120 * h + 25 * h * h,
-    regen: 0.5 + 2.5 * h,
+    regen: 0.5 + 2.5 * h + 1.5 * u.regen,
+    block: 0.06 * u.regen,
     reach: 1 + 1.5 * d,
-    crit: Math.min(0.6, 0.05 + 0.06 * d),
-    critMul: 2 + 0.15 * d,
+    crit: Math.min(0.75, 0.05 + 0.06 * d + 0.05 * u.crit),
+    critMul: 2 + 0.15 * d + 0.25 * u.crit,
     projSpeed: 20 + 5 * d,
-    fireRate: 0.8 * (1 + 0.3 * e),
+    fireRate: 0.8 * (1 + 0.3 * e) * (1 + 0.12 * u.rapid),
+    twin: 0.12 * u.twin,
+    chain: 0.1 * u.chain,
+    chainHops: 1 + Math.floor(u.chain / 2),
+    frost: 0.09 * u.frost,
+    bounty: 0.08 * u.bounty,
     weapons: 1 + Math.floor((e + 1) / 3),
     energyMax: e > 0 ? 40 + 30 * e : 0,
     energyRegen: e > 0 ? 1.5 + e : 0,

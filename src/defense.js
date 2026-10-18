@@ -9,15 +9,20 @@ import { stoneTexture, textTexture } from './textures.js';
 const SL = SECTOR_LEN, L = CORRIDOR_LEN, HW = CORRIDOR_W / 2;
 const NV = 20;          // max vision sources in the fog shader
 const FOG_Y = 4.4;      // height of the fog plane
-export const WAVES_PER_SECTOR = 3;
+export const WAVES_PER_SECTOR = 5;
+export let DIFF_STEP = 0.75; // difficulty gained per wave (40 waves in total)
+export let HP_QUAD = 0.03;
+export const setDiffStep = (v, q = HP_QUAD) => { DIFF_STEP = v; HP_QUAD = q; }; // for balance testing
 
 export const ENEMY_TYPES = {
-  crawler:  { name: 'Crawler',  hp: 14,   speed: 2.4, dmg: 3,  range: 1.4, atkRate: 1.0, reward: 4,   leak: 1,  color: '#ff5a4a', desc: 'Swarming bug. Weak alone, dangerous in numbers. Chews on any tower it passes.' },
-  runner:   { name: 'Runner',   hp: 9,    speed: 4.6, dmg: 0,  range: 0,   atkRate: 0,   reward: 5,   leak: 1,  color: '#ffa040', ignoresTowers: true, desc: 'Fast and fragile. Ignores towers and sprints straight for the core.' },
-  brute:    { name: 'Brute',    hp: 120,  speed: 1.4, dmg: 8,  range: 1.8, atkRate: 0.6, reward: 20,  leak: 3,  color: '#c080ff', desc: 'Armored juggernaut. Hunts down towers and smashes them.' },
-  spitter:  { name: 'Spitter',  hp: 35,   speed: 2.0, dmg: 8,  range: 9,   atkRate: 0.5, reward: 8,   leak: 2,  color: '#60ff60', ranged: true, desc: 'Lobs acid at towers from long range. Kill it before it gets close.' },
-  colossus: { name: 'Colossus', hp: 1200, speed: 1.0, dmg: 45, range: 2.6, atkRate: 0.5, reward: 150, leak: 12, color: '#ff40c0', boss: true, desc: 'Boss of every 10th wave. Brings the walls down.' },
+  crawler:  { name: 'Crawler',  hp: 14,   speed: 2.4, dmg: 3,  range: 1.4, atkRate: 1.0, reward: 5,   leak: 1,  color: '#ff5a4a', desc: 'Swarming bug. Weak alone, dangerous in numbers. Chews on any tower it passes.' },
+  runner:   { name: 'Runner',   hp: 9,    speed: 4.6, dmg: 0,  range: 0,   atkRate: 0,   reward: 6,   leak: 1,  color: '#ffa040', ignoresTowers: true, desc: 'Fast and fragile. Ignores towers and sprints straight for the core.' },
+  brute:    { name: 'Brute',    hp: 120,  speed: 1.4, dmg: 8,  range: 1.8, atkRate: 0.6, reward: 25,  leak: 3,  color: '#c080ff', desc: 'Armored juggernaut. Hunts down towers and smashes them.' },
+  spitter:  { name: 'Spitter',  hp: 35,   speed: 2.0, dmg: 8,  range: 9,   atkRate: 0.5, reward: 10,   leak: 2,  color: '#60ff60', ranged: true, desc: 'Lobs acid at towers from long range. Kill it before it gets close.' },
+  colossus: { name: 'Colossus', hp: 800,  speed: 1.0, dmg: 45, range: 2.6, atkRate: 0.5, reward: 200, leak: 12, color: '#ff40c0', boss: true, desc: 'Boss of every 10th wave. Brings the walls down.' },
 };
+
+const ATTRACT_UP = { rapid: 1, twin: 2, chain: 2, crit: 1, regen: 1, frost: 1, bounty: 0 };
 
 export const SPECIALS = [
   { id: 'slow', name: 'Time Warp',   key: '1', cost: 30, req: 1, desc: 'Slows all enemies by 60% for 6s' },
@@ -56,6 +61,7 @@ const M = {
   wood: std(0x6a4528), arrowTip: basic(0xffc080),
   spit: basic(0x60ff40),
   hailBolt: basic(0xa0f0ff),
+  twinBolt: basic(0x60ffe0),
   rubble: std(0x2a2826),
 };
 const ARROW_COLORS = [0xffd090, 0xffa040, 0xff6030, 0xff3060, 0xd040ff, 0x9070ff, 0x60c0ff, 0xffffff];
@@ -285,8 +291,9 @@ export class Defense {
   }
 
   stats() {
-    return this.attract ? towerStats({ alcamanium: 2, vitrium: 3, quicksilite: 2, voltarite: 1 }) : towerStats();
+    return this.attract ? towerStats({ alcamanium: 2, vitrium: 3, quicksilite: 2, voltarite: 1 }, ATTRACT_UP) : towerStats();
   }
+  _sfx(name) { if (!this.attract) emit('sfx', { name, view: 'defense' }); }
 
   // ----- world building -----
   _buildWorld() {
@@ -458,13 +465,13 @@ export class Defense {
     if (this.towers[s]?.alive) return;
     if (!this.canBuildSector(s)) {
       toast(s > this.cleared ? `Beat the waves in Sector ${this.cleared + 1} first` : 'Only the front sector can hold an active tower', 'bad');
-      emit('sfx', 'error');
+      this._sfx('error');
       return;
     }
     if (!spend(this.towerCost(s))) return;
     const p = this._clampInSector(s, x, z);
     this._placeTower(s, p.x, p.z);
-    emit('sfx', 'build');
+    this._sfx('build');
     game.flags.towerBuilt = true;
     this.selected = this.towers[s];
   }
@@ -517,7 +524,7 @@ export class Defense {
     if (short > 0) bounty += short;
     earn(bounty);
     emit('sectorCleared', { sector: s, bounty, nextCost: this.towerCost(this.cleared), last: false });
-    emit('sfx', 'tier');
+    this._sfx('fanfare');
   }
 
   // light sweeps up the corridor from the cleared sector through the newly lit one
@@ -539,7 +546,13 @@ export class Defense {
 
   _damageTower(t, dmg) {
     if (!t.alive) return;
+    if (Math.random() < this.stats().block) {
+      this._ring(t.x, t.z, 0x60e0ff, 2.2, 0.3);
+      this._sfx('shield');
+      return;
+    }
     t.hp -= dmg;
+    this._sfx('hurt');
     t.flash = 0.15;
     if (!this.attract) { this.lastTowerHit = game.time; this.lastHitSector = t.sector; }
     if (t.hp <= 0) this._destroyTower(t);
@@ -559,22 +572,24 @@ export class Defense {
     this.shake = 0.6;
     if (this.attract) { setTimeout(() => { if (!this.towers[s]?.alive) this._placeTower(s, t.x, t.z); }, 5000); return; }
     this.refreshSectors();
-    emit('sfx', 'destroyed');
+    this._sfx('destroyed');
     toast(`Tower in Sector ${s + 1} was destroyed! Strengthen it in the Factory.`, 'bad');
   }
 
   // ----- waves -----
-  hpMul(w = this.wave) { return 1 + 0.15 * (w - 1) + 0.015 * (w - 1) ** 2; }
-  dmgMul(w = this.wave) { return 1 + 0.06 * (w - 1); }
+  diff(w = this.wave) { return 1 + (w - 1) * DIFF_STEP; }
+  hpMul(w = this.wave) { const d = this.diff(w) - 1; return 1 + 0.15 * d + HP_QUAD * d * d; }
+  dmgMul(w = this.wave) { return 1 + 0.06 * (this.diff(w) - 1); }
 
   composition(w) {
     const c = {};
     if (this.attract) { c.crawler = 6; c.runner = 2; if (Math.random() < 0.5) c.brute = 1; return c; }
-    c.crawler = 3 + Math.floor(w * 1.5);
-    if (w >= 2) c.runner = 1 + Math.floor((w - 2) * 1.1);
-    if (w >= 3) c.brute = 1 + Math.floor((w - 3) / 2.5);
-    if (w >= 5) c.spitter = 1 + Math.floor((w - 5) / 1.8);
-    if (w % 10 === 0) c.colossus = w / 10;
+    const d = this.diff(w);
+    c.crawler = 3 + Math.floor(d * 1.5);
+    if (w >= 2) c.runner = 1 + Math.floor((d - 1.6) * 1.1);
+    if (w >= 3) c.brute = 1 + Math.floor((d - 2.2) / 2.5);
+    if (w >= 6) c.spitter = 1 + Math.floor((d - 4) / 1.8);
+    if (w % 10 === 0) c.colossus = Math.ceil(w / 20);
     return c;
   }
 
@@ -592,9 +607,9 @@ export class Defense {
     this.spawnQueue = q;
     this.spawnTimer = 0;
     this.waveActive = true;
-    this.bonusPending = 8 + this.wave * 2;
+    this.bonusPending = Math.round(12 + 3 * this.diff());
     if (!this.attract) {
-      emit('sfx', 'wave');
+      this._sfx('wave');
       toast(`Wave ${this.wave} is coming out of the dark!`, 'warn');
     }
   }
@@ -641,7 +656,7 @@ export class Defense {
     setBar(e.bar, e.hp / e.maxHP);
     this._burst(e.x, 0.9, e.z, crit ? 0xffff60 : 0xffa060, crit ? 6 : 3, 3);
     if (e.hp <= 0) this._killEnemy(e);
-    else emit('sfx', 'hit');
+    else this._sfx(crit ? 'crit' : 'hit');
   }
 
   _killEnemy(e) {
@@ -651,18 +666,27 @@ export class Defense {
     const c = new THREE.Color(e.T.color).getHex();
     this._burst(e.x, 0.8, e.z, c, e.T.boss ? 60 : 14, e.T.boss ? 9 : 5);
     if (!this.attract) {
-      earn(Math.round(e.T.reward * (1 + 0.05 * (this.wave - 1))));
+      let reward = Math.round(e.T.reward * (1 + 0.02 * (this.diff() - 1)));
+      if (Math.random() < this.stats().bounty) {
+        reward *= 2;
+        this._burst(e.x, 1.4, e.z, 0xffd046, 10, 4);
+        this._sfx('coin');
+      }
+      earn(reward);
       game.stats.kills++;
-      emit('sfx', 'kill');
+      this._sfx('kill');
     }
   }
 
   // ----- projectiles & effects -----
-  _fire(t, e, S) {
+  _fire(t, e, S, twin = false) {
     const crit = Math.random() < S.crit;
     const tier = Math.min(ARROW_COLORS.length - 1, S.attackTier);
     let m;
-    if (tier === 0) {
+    if (twin) {
+      m = new THREE.Mesh(G.bolt, M.twinBolt);
+      m.scale.setScalar(1.2);
+    } else if (tier === 0) {
       m = new THREE.Group();
       m.add(new THREE.Mesh(G.shaft, M.wood), new THREE.Mesh(G.tip, M.arrowTip));
     } else {
@@ -671,7 +695,41 @@ export class Defense {
     }
     m.position.set(t.x, 4.6, t.z);
     this.scene.add(m);
-    this.arrows.push({ mesh: m, target: e, tx: e.x, tz: e.z, speed: S.projSpeed, dmg: S.damage * (crit ? S.critMul : 1), crit });
+    this.arrows.push({
+      mesh: m, target: e, tx: e.x, tz: e.z, speed: S.projSpeed, dmg: S.damage * (crit ? S.critMul : 1), crit,
+      frost: Math.random() < S.frost, chain: Math.random() < S.chain ? S.chainHops : 0,
+    });
+  }
+
+  // Chain Laser: the hit jumps to the nearest enemies it hasn't touched yet
+  _chain(from, dmg, hops) {
+    const hit = new Set([from]);
+    let cur = { x: from.x, z: from.z };
+    for (let k = 0; k < hops; k++) {
+      let best = null, bd = 7;
+      for (const e of this.enemies) {
+        if (hit.has(e) || e.dead) continue;
+        const d = Math.hypot(e.x - cur.x, e.z - cur.z);
+        if (d < bd) { bd = d; best = e; }
+      }
+      if (!best) break;
+      hit.add(best);
+      this._beam(cur.x, cur.z, best.x, best.z, 0xb070ff);
+      cur = { x: best.x, z: best.z };
+      this._damageEnemy(best, dmg);
+    }
+    if (hit.size > 1) this._sfx('zap');
+  }
+
+  _beam(x1, z1, x2, z2, color) {
+    const a = new THREE.Vector3(x1, 0.9, z1), b = new THREE.Vector3(x2, 0.9, z2);
+    const len = a.distanceTo(b);
+    const m = new THREE.Mesh(G.cyl, basic(color, { transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+    m.scale.set(0.07, len, 0.07);
+    m.position.copy(a).add(b).multiplyScalar(0.5);
+    m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize());
+    this.scene.add(m);
+    this.fx.push({ mesh: m, t: 0, life: 0.22, beam: true });
   }
 
   _spit(e, t) {
@@ -705,8 +763,8 @@ export class Defense {
   useSpecial(id) {
     const sp = SPECIALS.find(s => s.id === id);
     const S = this.stats();
-    if (S.energyTier < sp.req) { toast(`${sp.name} needs Energy Tier ${sp.req} (Voltarite)`, 'bad'); emit('sfx', 'error'); return; }
-    if (this.energy < sp.cost) { toast(`Not enough energy for ${sp.name}`, 'bad'); emit('sfx', 'error'); return; }
+    if (S.energyTier < sp.req) { toast(`${sp.name} needs Energy Tier ${sp.req} (Voltarite)`, 'bad'); this._sfx('error'); return; }
+    if (this.energy < sp.cost) { toast(`Not enough energy for ${sp.name}`, 'bad'); this._sfx('error'); return; }
     if (id === 'hail') {
       const vis = this.enemies.filter(e => this.stateAtX(e.x) === 2);
       if (!vis.length) { toast('No visible enemies to target', 'bad'); return; }
@@ -720,7 +778,7 @@ export class Defense {
     if (id === 'slow') this.slowT = 6;
     if (id === 'over') this.overT = 6;
     this.energy -= sp.cost;
-    emit('sfx', 'special');
+    this._sfx('special');
   }
 
   // ----- update -----
@@ -737,7 +795,7 @@ export class Defense {
       this.spawnTimer -= dt;
       if (this.spawnTimer <= 0 && this.spawnQueue.length) {
         this._spawn(this.spawnQueue.shift());
-        this.spawnTimer = Math.max(0.3, 1.0 - this.wave * 0.025) * (0.6 + Math.random() * 0.8);
+        this.spawnTimer = Math.max(0.3, 1.0 - this.diff() * 0.025) * (0.6 + Math.random() * 0.8);
       }
       if (!this.spawnQueue.length) { this.waveActive = false; this.waveTimer = this.attract ? 8 : 45; }
     }
@@ -798,6 +856,7 @@ export class Defense {
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       const e = this.enemies[i], T = e.T;
       let spd = T.speed * slow;
+      if (e.slowT > 0) { e.slowT -= dt; spd *= 0.5; }
       if (this.stateAtX(e.x) === 0) spd *= 3; // they rush through the darkness
       e.atkCd -= dt;
       // every tower-hunting enemy goes for the tower of the sector it is in
@@ -856,7 +915,7 @@ export class Defense {
         this._burst(-2, 2, e.z * 0.3, 0x40e0ff, 10, 5);
         if (!this.attract) {
           game.coreHP = Math.max(0, game.coreHP - T.leak);
-          emit('sfx', 'alert');
+          this._sfx('alarm');
           toast(`A ${T.name} reached the core! (−${T.leak})`, 'bad');
           if (game.coreHP <= 0 && !game.over) { game.over = true; emit('gameover'); }
         }
@@ -879,9 +938,16 @@ export class Defense {
         const inRange = this.enemies.filter(e => e.x >= lo && e.x <= hi);
         if (inRange.length) {
           inRange.sort((a, b) => a.x - b.x);
-          for (const e of inRange.slice(0, S.weapons)) this._fire(t, e, S);
+          const targets = inRange.slice(0, S.weapons);
+          for (const e of targets) this._fire(t, e, S);
+          // Twin Laser: a chance for an extra shot at a different enemy
+          const spare = inRange.filter(e => !targets.includes(e));
+          if (Math.random() < S.twin) {
+            this._fire(t, spare.length ? spare[Math.floor(Math.random() * spare.length)] : targets[0], S, true);
+            this._sfx('twin');
+          }
           t.cd = 1 / S.fireRate;
-          if (!this.attract) emit('sfx', 'shoot');
+          this._sfx(S.attackTier ? 'laser' : 'shoot');
         }
       }
       const m = t.mesh;
@@ -911,7 +977,12 @@ export class Defense {
       const d = a.mesh.position.distanceTo(tmp);
       const step = a.speed * dt;
       if (d <= step + 0.3) {
-        if (!a.target.dead) this._damageEnemy(a.target, a.dmg, a.crit);
+        if (!a.target.dead) {
+          const tgt = a.target;
+          if (a.frost) { tgt.slowT = 2.5; this._burst(tgt.x, 1, tgt.z, 0x9fe8ff, 5, 2); this._sfx('frost'); }
+          this._damageEnemy(tgt, a.dmg, a.crit);
+          if (a.chain) this._chain(tgt, a.dmg * 0.6, a.chain);
+        }
         this.scene.remove(a.mesh);
         this.arrows.splice(i, 1);
         continue;
@@ -943,7 +1014,7 @@ export class Defense {
         this.scene.remove(b.mesh);
         this.bolts.splice(i, 1);
         this.shake = Math.max(this.shake, 0.15);
-        emit('sfx', 'boom');
+        this._sfx('boom');
       }
     }
   }
@@ -963,8 +1034,8 @@ export class Defense {
       const f = this.fx[i];
       f.t += dt;
       const k = f.t / f.life;
-      if (k >= 1) { this.scene.remove(f.mesh); f.mesh.geometry.dispose(); f.mesh.material.dispose(); this.fx.splice(i, 1); continue; }
-      f.mesh.scale.setScalar(0.3 + k * f.maxR);
+      if (k >= 1) { this.scene.remove(f.mesh); if (!f.beam) f.mesh.geometry.dispose(); f.mesh.material.dispose(); this.fx.splice(i, 1); continue; }
+      if (!f.beam) f.mesh.scale.setScalar(0.3 + k * f.maxR);
       f.mesh.material.opacity = 1 - k;
     }
   }
@@ -996,7 +1067,7 @@ export class Defense {
     const c = Math.cos(this.yawCur), s = Math.sin(this.yawCur);
     return { fx: c, fz: -s, rx: s, rz: c };
   }
-  rotateView() { this.yaw += Math.PI / 2; emit('sfx', 'click'); }
+  rotateView() { this.yaw += Math.PI / 2; this._sfx('click'); }
 
   _ndc(ev) {
     const r = this.rect;
@@ -1049,7 +1120,7 @@ export class Defense {
     if (!d || d.moved || ev.button !== 0) return;
     const h = this._pick(ev);
     if (!h) { this.selected = null; return; }
-    if (h.tower) { this.selected = this.selected === h.tower ? null : h.tower; emit('sfx', 'click'); return; }
+    if (h.tower) { this.selected = this.selected === h.tower ? null : h.tower; this._sfx('click'); return; }
     if (this.towers[h.sector]?.alive) { this.selected = this.towers[h.sector]; return; }
     this.buildAt(h.x, h.z);
     this._updateGhost();

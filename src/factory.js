@@ -43,6 +43,14 @@ const M = {
   arrow: basic(0xffffff), teleBase: std(0x252a38, 0, 0, { metalness: 0.7 }),
 };
 const mkMats = MK_COLORS.map(c => basic(c));
+// extra parts that appear on upgraded buildings
+const UP = {
+  cyan: basic(0x40e0ff), gold: basic(0xffc040), red: basic(0xff5060),
+  glass: basic(0x40e0ff, { transparent: true, opacity: 0.55 }),
+  under2: basic(0x40e0ff, { transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false }),
+  under3: basic(0xff5060, { transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false }),
+  torus: new THREE.TorusGeometry(1, 0.08, 6, 28),
+};
 
 function mesh(geo, mat, sx = 1, sy = sx, sz = sx, x = 0, y = 0, z = 0) {
   const m = new THREE.Mesh(geo, mat);
@@ -239,15 +247,95 @@ export class Factory {
           g.add(mesh(G.box, M.steel, 0.14, 0.9, 0.14, Math.cos(a) * 0.82, 0.6, Math.sin(a) * 0.82));
           g.add(mesh(G.sphere, ringMat, 0.08, 0.08, 0.08, Math.cos(a) * 0.82, 1.1, Math.sin(a) * 0.82));
         }
-        b.parts = { r1, r2, r3, beam, beamMat, ringMat };
+        Object.assign(b.parts, { r1, r2, r3, beam, beamMat, ringMat });
         break;
       }
     }
+    this._buildUpgradeParts(b, g);
     const size = sizeOf(b.type);
     g.position.set(b.x + size / 2, 0, b.y + size / 2);
     g.rotation.y = -b.dir * Math.PI / 2;
     g.userData.building = b;
     return g;
+  }
+
+  // Mk2 and Mk3 each add visible hardware, so upgrades are obvious at a glance
+  _buildUpgradeParts(b, g) {
+    const m2 = new THREE.Group(), m3 = new THREE.Group();
+    b.parts.spin = [];
+    switch (b.type) {
+      case 'belt':
+        m2.add(mesh(G.box, UP.cyan, 0.9, 0.03, 0.03, 0, 0.15, 0.46), mesh(G.box, UP.cyan, 0.9, 0.03, 0.03, 0, 0.15, -0.46));
+        m2.add(mesh(G.box, UP.under2, 1, 0.02, 1.0, 0, 0.01, 0));
+        m3.add(mesh(G.box, UP.under3, 1.02, 0.03, 1.08, 0, 0.012, 0));
+        for (const z of [0.5, -0.5]) for (const x of [-0.3, 0.3]) m3.add(mesh(G.sphere, UP.red, 0.05, 0.05, 0.05, x, 0.16, z));
+        break;
+      case 'miner': {
+        const d2 = new THREE.Group();
+        d2.add(mesh(G.cyl, M.drill, 0.14, 0.3, 0.14, 0, 0, 0));
+        for (let i = 0; i < 2; i++) { const t = mesh(G.box, M.drill, 0.06, 0.24, 0.36, 0, 0, 0); t.rotation.y = i * Math.PI / 2; d2.add(t); }
+        d2.position.set(-0.24, 0.78, -0.24);
+        m2.add(d2);
+        b.parts.spin.push([d2, 9]);
+        for (const z of [0.41, -0.41]) m2.add(mesh(G.box, UP.cyan, 0.5, 0.06, 0.02, 0.05, 0.42, z));
+        const crown = new THREE.Mesh(UP.torus, UP.gold);
+        crown.scale.setScalar(0.32);
+        crown.rotation.x = Math.PI / 2;
+        crown.position.y = 1.12;
+        m3.add(crown);
+        for (const [x, z] of [[0.4, 0.4], [0.4, -0.4], [-0.4, 0.4], [-0.4, -0.4]]) {
+          m3.add(mesh(G.box, M.steelDark, 0.07, 0.55, 0.07, x, 0.6, z), mesh(G.sphere, UP.gold, 0.06, 0.06, 0.06, x, 0.9, z));
+        }
+        b.parts.spin.push([crown, 4, 'z']);
+        break;
+      }
+      case 'refinery': {
+        m2.add(mesh(G.cyl, UP.glass, 0.13, 0.42, 0.13, 0.3, 0.98, 0.3), mesh(G.cyl, M.steelDark, 0.15, 0.06, 0.15, 0.3, 1.2, 0.3));
+        m2.add(mesh(G.box, M.steelDark, 0.35, 0.05, 0.05, 0.18, 0.85, 0.3));
+        const halo = new THREE.Mesh(UP.torus, UP.gold);
+        halo.scale.setScalar(0.36);
+        halo.position.set(0.05, 0.85, 0);
+        m3.add(halo);
+        m3.add(mesh(G.cyl, M.steelDark, 0.08, 0.8, 0.08, -0.28, 1.1, 0), mesh(G.sphere, UP.red, 0.07, 0.07, 0.07, -0.28, 1.52, 0));
+        b.parts.spin.push([halo, 2.5, 'x'], [halo, 1.7, 'y']);
+        break;
+      }
+      case 'teleporter': {
+        const r4 = new THREE.Mesh(UP.torus, UP.cyan);
+        r4.scale.setScalar(0.72);
+        r4.position.y = 1.9;
+        m2.add(r4);
+        b.parts.spin.push([r4, 1.2, 'y'], [r4, 0.7, 'x']);
+        for (let i = 0; i < 4; i++) {
+          const a = i * Math.PI / 2 + Math.PI / 4;
+          m2.add(mesh(G.box, UP.cyan, 0.16, 0.08, 0.16, Math.cos(a) * 0.82, 0.3, Math.sin(a) * 0.82));
+        }
+        const base = new THREE.Mesh(UP.torus, UP.gold);
+        base.scale.setScalar(1.0);
+        base.rotation.x = Math.PI / 2;
+        base.position.y = 0.1;
+        m3.add(base);
+        const orbit = new THREE.Group();
+        for (let i = 0; i < 3; i++) {
+          const a = i * Math.PI * 2 / 3;
+          orbit.add(mesh(G.sphere, UP.gold, 0.1, 0.1, 0.1, Math.cos(a) * 0.95, 0, Math.sin(a) * 0.95));
+        }
+        orbit.position.y = 1.5;
+        m3.add(orbit);
+        b.parts.spin.push([orbit, 2.2, 'y']);
+        break;
+      }
+    }
+    g.add(m2, m3);
+    b.parts.mk2 = m2;
+    b.parts.mk3 = m3;
+    this._showLevel(b);
+  }
+
+  _showLevel(b) {
+    const l = lvl(b.type);
+    if (b.parts.mk2) { b.parts.mk2.visible = l >= 1; b.parts.mk3.visible = l >= 2; }
+    if (b.parts.band) b.parts.band.material = mkMats[l];
   }
 
   // ----- grid helpers -----
@@ -262,7 +350,6 @@ export class Factory {
     if (type === 'teleporter') { b.pulse = 0; b.received = 0; }
     b.mesh = this._buildMesh(b);
     this.scene.add(b.mesh);
-    if (b.parts.band) b.parts.band.material = mkMats[lvl(type)];
     b.mesh.scale.setScalar(1 + lvl(type) * 0.04);
     const size = sizeOf(type);
     for (let j = 0; j < size; j++) for (let i = 0; i < size; i++) this.grid[(y + j) * N + x + i] = b;
@@ -292,7 +379,7 @@ export class Factory {
     if (!spend(cost)) { this.placing = false; return null; }
     const b = this._place(type, x, y, this.rot);
     b.spent = cost;
-    emit('sfx', 'place');
+    emit('sfx', { name: 'place', view: 'factory' });
     if (type === 'miner') game.flags.minerPlaced = true;
     if (type === 'refinery') game.flags.refineryPlaced = true;
     return b;
@@ -312,7 +399,7 @@ export class Factory {
     const refund = b.spent * 0.5;
     game.credits += refund;
     if (this.selected === b) this.selected = null;
-    emit('sfx', 'remove');
+    emit('sfx', { name: 'remove', view: 'factory' });
   }
 
   setDir(b, dir) {
@@ -325,12 +412,14 @@ export class Factory {
   _applyLevels() {
     const key = JSON.stringify(game.upgrades);
     if (key === this._lvlKey) return;
+    const prev = this._lvlPrev || {};
     this._lvlKey = key;
+    this._lvlPrev = { ...game.upgrades };
     M.rail.color.setHex(RAIL_COLORS[lvl('belt')]);
     for (const b of this.buildings) {
-      const l = lvl(b.type);
-      if (b.parts.band) b.parts.band.material = mkMats[l];
-      b.mesh.scale.setScalar(1 + l * 0.04);
+      this._showLevel(b);
+      b.mesh.scale.setScalar(1 + lvl(b.type) * 0.04);
+      if (prev[b.type] !== undefined && prev[b.type] !== lvl(b.type)) b.levelFx = 1; // pop animation
     }
   }
 
@@ -361,7 +450,7 @@ export class Factory {
       b.pulse = 1;
       game.flags.delivered = true;
       emit('delivered', res);
-      emit('sfx', 'deliver');
+      emit('sfx', { name: 'teleport', view: 'factory' });
       return true;
     }
     return false;
@@ -387,6 +476,11 @@ export class Factory {
     const v = BELT_SPEEDS[game.beltTier];
     beltTex.offset.x -= v * dt;
     for (const b of this.buildings) {
+      if (b.parts.spin) for (const [o, sp, ax = 'y'] of b.parts.spin) if (o.parent.visible) o.rotation[ax] += dt * sp;
+      if (b.levelFx > 0) {
+        b.levelFx = Math.max(0, b.levelFx - dt * 1.6);
+        b.mesh.scale.setScalar((1 + lvl(b.type) * 0.04) * (1 + 0.3 * Math.sin(Math.PI * b.levelFx)));
+      }
       if (b.type === 'belt') {
         const its = b.items;
         for (let i = its.length - 1; i >= 0; i--) {
@@ -398,7 +492,7 @@ export class Factory {
       } else if (b.type === 'miner') {
         if (b.out < 0) {
           b.timer += dt * MK_MULT[lvl(b.type)] * BUILD.miner.base / 60;
-          if (b.timer >= 1) { b.timer -= 1; b.out = b.res * 2; }
+          if (b.timer >= 1) { b.timer -= 1; b.out = b.res * 2; emit('sfx', { name: 'drill', view: 'factory' }); }
           b.status = 'Quarrying';
         }
         if (b.out >= 0) {
@@ -416,7 +510,7 @@ export class Factory {
         if (b.work >= 0) {
           b.prog += dt * MK_MULT[lvl(b.type)] * BUILD.refinery.base / 60;
           b.status = 'Refining';
-          if (b.prog >= 1) { b.outCount++; b.outKind = b.work; b.work = -1; game.flags.refined = true; }
+          if (b.prog >= 1) { b.outCount++; b.outKind = b.work; b.work = -1; game.flags.refined = true; emit('sfx', { name: 'refine', view: 'factory' }); }
         } else b.status = b.outCount >= 3 ? 'Output blocked' : 'Waiting for ore';
         if (b.outCount > 0 && this._push(b, b.outKind)) b.outCount--;
         const ri = b.work >= 0 ? b.work >> 1 : b.inKind >= 0 ? b.inKind >> 1 : -1;

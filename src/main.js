@@ -3,7 +3,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { game, on, resetGame, updateEconomy } from './state.js';
+import { game, on, resetGame, updateEconomy, TOWER_UPGRADES } from './state.js';
 import { Defense } from './defense.js';
 import { Factory } from './factory.js';
 import { UI } from './ui.js';
@@ -121,6 +121,7 @@ function startGame(save) {
   if (save) {
     Object.assign(game, save.game, { research: new Set(save.game.research), discovered: new Set(save.game.discovered), view: 'defense' });
     game.upgrades = { miner: 0, refinery: 0, belt: game.beltTier || 0, teleporter: 0, ...save.game.upgrades };
+    game.towerUp = { ...Object.fromEntries(Object.keys(TOWER_UPGRADES).map(k => [k, 0])), ...(save.game.towerUp || {}) };
     defense.load(save.defense);
     factory.load(save.factory);
     split = !!save.split;
@@ -162,6 +163,7 @@ on('openModal', id => ui.openModal(id));
 on('victory', () => {
   game.over = true;
   clearSave();
+  $('btn-keep').classList.add('hidden');
   $('go-title').textContent = 'Corridor Secured!';
   $('go-title').classList.remove('bad');
   $('go-stats').innerHTML = `All 8 sectors cleared in <b>${game.wave}</b> waves<br>Enemies slain <b>${game.stats.kills}</b><br>Crystals teleported <b>${game.stats.delivered}</b><br>Credits earned <b>${Math.round(game.stats.earned)}</b>`;
@@ -170,6 +172,7 @@ on('victory', () => {
 });
 on('gameover', () => {
   clearSave();
+  $('btn-keep').classList.remove('hidden');
   $('go-title').textContent = 'The Core Has Fallen';
   $('go-title').classList.add('bad');
   $('go-stats').innerHTML = `Survived to wave <b>${game.wave}</b><br>Enemies slain <b>${game.stats.kills}</b><br>Crystals teleported <b>${game.stats.delivered}</b><br>Credits earned <b>${game.stats.earned}</b>`;
@@ -213,6 +216,19 @@ $('btn-resume').onclick = () => setPause(false);
 $('btn-quit').onclick = toMenu;
 $('btn-quit2').onclick = toMenu;
 $('btn-retry').onclick = () => startGame(null);
+// lose the corridor, keep everything built in the factory (machines, upgrades, research, tower upgrades)
+$('btn-keep').onclick = () => {
+  audio.sfx('build');
+  Object.assign(game, { over: false, paused: false, wave: 0, coreHP: game.coreMax, credits: Math.max(game.credits, 100) });
+  defense = new Defense(false);
+  modal = false;
+  layout();
+  ui.setView(game.view, split);
+  ui.hideSectorCleared();
+  $('gameover').classList.add('hidden');
+  saveGame();
+  ui.toast('A new core is online. Your factory kept running — rebuild from Sector 1.', 'good');
+};
 // opening a modal in-game pauses, closing it resumes
 const origClose = ui.closeModals.bind(ui);
 ui.closeModals = (notify = true) => { origClose(notify); if (notify && mode === 'playing') game.paused = false; };
@@ -266,7 +282,7 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyF') { toggleSpeed(); return; }
   if (e.code === 'KeyV') { toggleSplit(); return; }
   if (e.code === 'KeyK') { ui.openModal('codex'); return; }
-  if (e.code === 'KeyU') { ui.openModal('upgrades'); return; }
+  if (e.code === 'KeyU') { ui.upgTab = game.view === 'defense' ? 'tower' : 'factory'; ui.openModal('upgrades'); return; }
   if (e.code === 'KeyY') { ui.openModal('research'); return; }
   const v = focused();
   v.keys.add(e.code);
@@ -312,6 +328,8 @@ function frame(now) {
     }
     defense.updateCamera(dt);
     factory.updateCamera(dt);
+    audio.visible.defense = split || game.view === 'defense';
+    audio.visible.factory = split || game.view === 'factory';
     ui.update(defense, factory, { split, hoverView, mouse });
     if (split) { renderView(defense, composers[0]); renderView(factory, composers[1]); }
     else renderView(game.view === 'defense' ? defense : factory, composers[0]);

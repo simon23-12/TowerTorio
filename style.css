@@ -181,6 +181,10 @@ body.split::after { content: ''; position: fixed; top: 0; bottom: 0; left: var(-
 .upg-body .meta { color: var(--dim); font-size: 13px; }
 .pips { display: flex; gap: 4px; } .pips i { width: 22px; height: 6px; border-radius: 3px; background: rgba(255,255,255,0.1); }
 
+.upg-tabs { display: flex; margin: 0 0 4px; }
+.upg-tabs .tab { flex: 0 0 auto; }
+.tc-row { display: flex; gap: 8px; align-items: center; }
+
 /* sector cleared */
 #sector-clear { position: fixed; inset: 0; z-index: 18; display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse at center, rgba(40,120,200,0.25), rgba(2,4,8,0.7)); animation: scfade .4s ease-out; }
 .sc-box { position: relative; overflow: hidden; width: min(560px, calc(100vw - 32px)); background: var(--panel); border: 1px solid rgba(96,224,255,0.6); border-radius: 14px; padding: 26px 28px 20px; text-align: center; box-shadow: 0 0 60px rgba(70,200,255,0.35); animation: scpop .55s cubic-bezier(.2,1.4,.4,1); }

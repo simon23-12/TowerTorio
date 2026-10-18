@@ -40,3 +40,22 @@ export function oreIcon(color) {
     <polygon points="60,18 74,46 60,40" fill="#fff" opacity="0.35"/>
     <polygon points="72,84 70,64 80,52 88,66 84,84" fill="${color}" opacity="0.7"/></svg>`;
 }
+
+// tile icons for the tower upgrade track
+export function towerUpIcon(id, level = 0) {
+  const lit = level > 0 ? 1 : 0.45;
+  const tower = `<rect x="38" y="46" width="24" height="40" fill="#5a5650"/><rect x="30" y="40" width="40" height="9" fill="#6a6660"/>
+    <rect x="28" y="84" width="44" height="8" fill="#34312e"/><polygon points="50,18 58,32 50,40 42,32" fill="#ffd090" opacity="${lit}"/>`;
+  const bug = (x, y, c = '#ff5a4a') => `<ellipse cx="${x}" cy="${y}" rx="9" ry="6" fill="${c}"/><circle cx="${x + 7}" cy="${y - 2}" r="2" fill="#fff"/>`;
+  let fx = '';
+  switch (id) {
+    case 'rapid': fx = [0, 1, 2].map(i => `<line x1="60" y1="${28 + i * 5}" x2="${88 - i * 6}" y2="${18 + i * 12}" stroke="#ffa040" stroke-width="3" stroke-linecap="round" opacity="${lit}"/>`).join(''); break;
+    case 'twin': fx = `<line x1="50" y1="30" x2="86" y2="20" stroke="#ffd090" stroke-width="3" opacity="${lit}"/><line x1="50" y1="30" x2="86" y2="54" stroke="#60ffe0" stroke-width="3" opacity="${lit}"/>${bug(88, 20)}${bug(88, 56)}`; break;
+    case 'chain': fx = `<polyline points="50,30 80,16 88,44 74,66" fill="none" stroke="#b070ff" stroke-width="3" opacity="${lit}"/>${bug(80, 16)}${bug(88, 44)}${bug(74, 66)}`; break;
+    case 'crit': fx = `<circle cx="80" cy="30" r="13" fill="none" stroke="#ffff60" stroke-width="3" opacity="${lit}"/><line x1="80" y1="12" x2="80" y2="48" stroke="#ffff60" stroke-width="2"/><line x1="62" y1="30" x2="98" y2="30" stroke="#ffff60" stroke-width="2"/>`; break;
+    case 'regen': fx = `<path d="M18 62 Q50 4 82 62" fill="none" stroke="#46ff88" stroke-width="4" opacity="${lit}"/><rect x="76" y="14" width="6" height="18" fill="#46ff88"/><rect x="70" y="20" width="18" height="6" fill="#46ff88"/>`; break;
+    case 'frost': fx = `<line x1="50" y1="30" x2="82" y2="40" stroke="#9fe8ff" stroke-width="3" opacity="${lit}"/>${bug(86, 44, '#7fb8ff')}${[0, 60, 120].map(a => `<line x1="${86 - 12 * Math.cos(a * Math.PI / 180)}" y1="${26 - 12 * Math.sin(a * Math.PI / 180)}" x2="${86 + 12 * Math.cos(a * Math.PI / 180)}" y2="${26 + 12 * Math.sin(a * Math.PI / 180)}" stroke="#cff4ff" stroke-width="2"/>`).join('')}`; break;
+    case 'bounty': fx = `<circle cx="80" cy="26" r="11" fill="#ffd046" opacity="${lit}"/><circle cx="86" cy="40" r="9" fill="#e0b030" opacity="${lit}"/><text x="80" y="31" font-size="13" text-anchor="middle" fill="#5a4010" font-family="sans-serif" font-weight="bold">◈</text>`; break;
+  }
+  return `<svg viewBox="0 0 100 100"><rect x="2" y="2" width="96" height="96" rx="6" fill="#141820"/>${tower}${fx}</svg>`;
+}

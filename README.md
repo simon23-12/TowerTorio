@@ -5,10 +5,12 @@ A browser game crossover of **tower defense** and **Factorio-style automation**,
 **Play:** https://simon23-12.github.io/TowerTorio/
 
 ## The idea
-- **The Corridor** – a very long corridor running bottom (core) to top (enemy portal), split into 8 sectors. At the start Sectors 1–2 are foggy and the rest is pitch black. Each sector holds one tower, placed anywhere inside it (placement doesn't matter). Only the front tower is active: beat its sector's 3 waves and enemies stop, the next sector lights up and the fog moves on. Build in the next sector to advance; the previous tower shuts down for good. Clear all 8 sectors to win. Towers identify the enemies they see; kills earn credits.
+- **The Corridor** – a very long corridor running bottom (core) to top (enemy portal), split into 8 sectors. At the start Sectors 1–2 are foggy and the rest is pitch black. Each sector holds one tower, placed anywhere inside it (placement doesn't matter). Only the front tower is active: beat its sector's 5 waves and enemies stop, the next sector lights up and the fog moves on. Build in the next sector to advance; the previous tower shuts down for good. Clear all 8 sectors to win. Towers identify the enemies they see; kills earn credits.
 - **The Factory** – a separate map. Quarry endless ore, refine it, and belt the crystals into a teleporter, which beams them to your towers. Extra teleporters can be bought.
 - Each resource powers one stat: Alcamanium → Attack, Vitrium → HP, Quicksilite → Dexterity, Voltarite → Energy (fire rate, extra weapons, special attacks).
 - Stat tiers depend on the **steady delivery rate** (crystals/min), so the factory has to keep running.
+- **Tower upgrades** (Upgrades → Tower tab, or the button in the corridor): Rapid Fire, Twin Laser, Chain Laser, Precision Optics, Nanite Repair (regen + block chance), Cryo Rounds (slow) and Bounty Protocol (double credits) — mostly chances that grow per level.
+- Lose the core and you can **start over from Sector 1 with your factory intact**.
 - Credits buy machines, **Upgrades** (Mk2/Mk3 for every building of a type at once, shown as visual cards) and **Research** (unlocks new elements to quarry).
 
 ## Controls
